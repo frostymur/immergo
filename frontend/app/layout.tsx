@@ -18,7 +18,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} font-sans min-h-screen bg-white text-foreground`}>
+      <body className={`${inter.variable} font-sans min-h-screen bg-background text-foreground`}>
         <LocaleProvider>
           <div className="flex min-h-screen">
             <Sidebar />

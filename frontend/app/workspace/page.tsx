@@ -34,7 +34,10 @@ function WorkspaceInner() {
   const searchParams = useSearchParams();
   const topic = searchParams.get("topic") || "General";
 
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const workspaceIdParam = searchParams.get("workspace_id");
+
+  const [workspaceId, setWorkspaceId] = useState<string | null>(workspaceIdParam);
+  const [workspaceTitle, setWorkspaceTitle] = useState<string>(topic);
   const [sources, setSources] = useState<Source[]>([]);
   const [summary, setSummary] = useState("");
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -64,13 +67,50 @@ function WorkspaceInner() {
         router.replace("/auth");
         return;
       }
+
+      if (workspaceIdParam) {
+        // Student opened a teacher-assigned workspace
+        const { data: ws } = await supabase
+          .from("workspaces")
+          .select("id, title, user_id")
+          .eq("id", workspaceIdParam)
+          .single();
+        if (ws) {
+          if (mounted) {
+            setWorkspaceId(ws.id);
+            setWorkspaceTitle(ws.title);
+          }
+          // Auto-enroll as class member if visiting someone else's workspace
+          if (ws.user_id !== userData.user.id) {
+            const { data: existing } = await supabase
+              .from("class_memberships")
+              .select("id")
+              .eq("workspace_id", ws.id)
+              .eq("student_id", userData.user.id)
+              .maybeSingle();
+            if (!existing) {
+              await supabase
+                .from("class_memberships")
+                .insert({ workspace_id: ws.id, student_id: userData.user.id })
+                .select()
+                .maybeSingle();
+            }
+          }
+          return;
+        }
+      }
+
+      // Otherwise load or create own workspace
       const { data: workspaces } = await supabase
         .from("workspaces")
-        .select("id")
+        .select("id, title")
         .eq("user_id", userData.user.id)
         .limit(1);
       if (workspaces && workspaces.length > 0) {
-        if (mounted) setWorkspaceId(workspaces[0].id);
+        if (mounted) {
+          setWorkspaceId(workspaces[0].id);
+          setWorkspaceTitle(workspaces[0].title);
+        }
       } else {
         const { data: newWs, error: wsErr } = await supabase
           .from("workspaces")
@@ -80,19 +120,22 @@ function WorkspaceInner() {
             grade: "9",
             user_id: userData.user.id,
           })
-          .select("id")
+          .select("id, title")
           .single();
         if (wsErr) {
           if (mounted) setError(wsErr.message);
           return;
         }
-        if (mounted) setWorkspaceId(newWs.id);
+        if (mounted) {
+          setWorkspaceId(newWs.id);
+          setWorkspaceTitle(newWs.title);
+        }
       }
     })();
     return () => {
       mounted = false;
     };
-  }, [supabase, topic, router]);
+  }, [supabase, topic, router, workspaceIdParam]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -208,14 +251,17 @@ function WorkspaceInner() {
       // Student answering an open whiteboard step -> evaluate via backend
       setLoading(true);
       try {
-        const res = await socraticAnswer(workspaceId, steps.find((s) => s.id === pendingStep)?.card.content || "", text, locale);
+        const asked = steps.find((s) => s.id === pendingStep)?.card.content || "";
+        const res = await socraticAnswer(workspaceId, asked, text, locale);
         setChat((prev) => [...prev, { role: "tutor", text: res.feedback }]);
         setSteps((prev) =>
           prev.map((s) =>
             s.id === pendingStep ? { ...s, status: "resolved" } : s
           )
         );
-        const nodeId = `topic:${topic.toLowerCase().replace(/\s+/g, "-")}`;
+        const nodeId = asked
+          ? `step:${asked.toLowerCase().slice(0, 60).replace(/[^a-z0-9]+/g, "-")}`
+          : `topic:${workspaceTitle.toLowerCase().replace(/\s+/g, "-")}`;
         await recordProgress(nodeId, res.correct ? "completed" : "failed", res.correct ? 0 : 1);
         if (!res.correct) {
           // Wrong -> Lumi pushes the next guiding step instead of the answer
@@ -235,7 +281,8 @@ function WorkspaceInner() {
         const res = await socraticChat(workspaceId, text, locale);
         setChat((prev) => [...prev, { role: "tutor", text: res.feedback }]);
         pushStep(res.card);
-        await recordProgress(`topic:${topic.toLowerCase().replace(/\s+/g, "-")}`, "completed");
+        const nodeId = `topic:${text.toLowerCase().slice(0, 60).replace(/[^a-z0-9]+/g, "-")}`;
+        await recordProgress(nodeId, "completed");
       } catch (err: any) {
         setError(err.message || "Something went wrong. Please try again.");
       } finally {
@@ -271,11 +318,11 @@ function WorkspaceInner() {
   const renderDiagram = (diagram: { nodes: DiagramNode[]; edges: DiagramEdge[] }) => {
     const edges = new Set(diagram.edges.map(([a, b]) => `${a}->${b}`));
     return (
-      <div className="p-3 bg-white border border-border mt-2">
+      <div className="p-3 bg-surface border border-border mt-2">
         <div className="flex flex-wrap items-stretch gap-1.5">
           {diagram.nodes.map((n, i) => (
             <div key={n.id} className="flex items-center gap-1.5">
-              <div className="border border-foreground px-2 py-1 text-[11px] font-mono bg-surface">
+              <div className="border border-primary px-2 py-1 text-[11px] font-mono bg-surface">
                 {n.label}
               </div>
               {i < diagram.nodes.length - 1 &&
@@ -297,20 +344,20 @@ function WorkspaceInner() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-white">
+      <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-surface">
         <div className="flex items-center gap-4">
-          <div>
-            <div className="text-sm font-semibold">{topic}</div>
-            <div className="font-mono text-[10px] uppercase tracking-widest text-muted">
-              [ LUMI_CANVAS: {pendingStep !== null ? "STEP_OPEN" : "ACTIVE"} ]
+            <div>
+              <div className="text-sm font-semibold">{workspaceTitle}</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                [ LUMI_CANVAS: {pendingStep !== null ? "STEP_OPEN" : "ACTIVE"} ]
+              </div>
             </div>
-          </div>
         </div>
         <UserAvatar />
       </header>
 
       {error && (
-        <div className="border-b border-border bg-white px-6 py-2.5 text-sm text-red-600 font-mono">
+        <div className="border-b border-border bg-surface px-6 py-2.5 text-sm text-red-600 font-mono">
           [ ERROR ] {error}
         </div>
       )}
@@ -329,7 +376,7 @@ function WorkspaceInner() {
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-1.5 px-4 py-3 text-xs font-medium font-mono uppercase tracking-wider transition-colors border-r border-border ${
                   activeTab === tab.key
-                    ? "bg-foreground text-white"
+                    ? "bg-primary text-foreground"
                     : "text-muted hover:text-foreground"
                 }`}
               >
@@ -349,7 +396,7 @@ function WorkspaceInner() {
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={loading}
-                    className="flex items-center gap-2 bg-foreground hover:bg-primary-hover disabled:opacity-40 text-white px-3 py-2 text-xs font-medium transition-colors"
+                    className="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground px-3 py-2 text-xs font-medium transition-colors"
                   >
                     <Upload size={12} />
                     {t("upload")}
@@ -386,14 +433,14 @@ function WorkspaceInner() {
                           <button
                             onClick={() => handleGenerateSummary(s.id)}
                             disabled={summaryLoading}
-                            className="border border-border bg-white px-2.5 py-1.5 text-[11px] font-medium hover:border-foreground transition-colors disabled:opacity-40"
+                            className="border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium hover:border-primary transition-colors disabled:opacity-40"
                           >
                             {t("summary")}
                           </button>
                           <button
                             onClick={() => handleGeneratePodcast(s.id)}
                             disabled={loading}
-                            className="border border-border bg-white px-2.5 py-1.5 text-[11px] font-medium hover:border-foreground transition-colors disabled:opacity-40"
+                            className="border border-border bg-surface px-2.5 py-1.5 text-[11px] font-medium hover:border-primary transition-colors disabled:opacity-40"
                           >
                             {t("generate.podcast")}
                           </button>
@@ -478,7 +525,7 @@ function WorkspaceInner() {
                 [ WHITEBOARD ]
               </span>
               {pendingCardText && (
-                <span className="font-mono text-[10px] uppercase tracking-widest text-foreground border border-foreground px-1.5 py-0.5">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-foreground border border-primary px-1.5 py-0.5">
                   STEP {steps.filter((s) => s.status === "pending").length} OPEN
                 </span>
               )}
@@ -501,8 +548,8 @@ function WorkspaceInner() {
               steps.map((step, i) => (
                 <div
                   key={step.id}
-                  className={`border p-4 bg-white ${
-                    step.status === "resolved" ? "border-foreground" : "border-foreground"
+                  className={`border p-4 bg-surface ${
+                    step.status === "resolved" ? "border-primary" : "border-primary"
                   }`}
                 >
                   <div className="flex items-center justify-between mb-2">
@@ -541,7 +588,7 @@ function WorkspaceInner() {
           </div>
 
           {/* Chat transcript */}
-          <div className="border-t border-border bg-white max-h-40 overflow-y-auto">
+          <div className="border-t border-border bg-surface max-h-40 overflow-y-auto">
             {chat.length === 0 ? (
               <div className="px-6 py-3 text-xs text-muted">
                 Transcript appears here as you work through the board.
@@ -564,7 +611,7 @@ function WorkspaceInner() {
           </div>
 
           {/* Input */}
-          <div className="border-t border-border p-4 bg-white">
+          <div className="border-t border-border p-4 bg-surface">
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleMic}
@@ -572,7 +619,7 @@ function WorkspaceInner() {
                 className={`flex items-center justify-center w-10 h-10 border transition-colors ${
                   isListening
                     ? "border-red-500 bg-red-500 text-white"
-                    : "border-border text-muted hover:border-foreground hover:text-foreground"
+                    : "border-border text-muted hover:border-primary hover:text-foreground"
                 }`}
               >
                 {isListening ? <Square size={14} /> : <Mic size={14} />}
@@ -587,12 +634,12 @@ function WorkspaceInner() {
                     ? "Answer the open step…"
                     : t("chat.placeholder")
                 }
-                className="flex-1 h-10 border border-border px-3 text-sm outline-none focus:border-foreground transition-colors"
+                className="flex-1 h-10 border border-border px-3 text-sm outline-none focus:border-primary transition-colors"
               />
               <button
                 onClick={handleSend}
                 disabled={loading || !question.trim()}
-                className="flex items-center justify-center w-10 h-10 bg-foreground hover:bg-primary-hover disabled:opacity-40 text-white transition-colors"
+                className="flex items-center justify-center w-10 h-10 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground transition-colors"
               >
                 <Send size={14} />
               </button>

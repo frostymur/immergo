@@ -33,7 +33,7 @@ export default function AuthCard() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-border p-6 shadow-sm">
+    <div className="bg-surface border border-border p-6 shadow-sm">
       <h3 className="text-lg font-semibold text-foreground mb-1">
         {mode === "login" ? "Welcome back" : "Create account"}
       </h3>
@@ -47,7 +47,7 @@ export default function AuthCard() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+            className="w-full border border-border px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
             placeholder="you@example.com"
             required
           />
@@ -58,7 +58,7 @@ export default function AuthCard() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+            className="w-full border border-border px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
             placeholder="Enter your password"
             required
           />
@@ -66,13 +66,13 @@ export default function AuthCard() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-medium transition-all"
+          className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-foreground py-2.5 text-sm font-medium transition-all"
         >
           {loading ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
         </button>
       </form>
       {message && (
-        <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+          <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 p-3">
           {message}
         </div>
       )}

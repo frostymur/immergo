@@ -50,8 +50,8 @@ export default function Sidebar() {
                 href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
                   isActive
-                    ? "bg-foreground text-white"
-                    : "text-muted hover:bg-white hover:text-foreground border border-transparent hover:border-border"
+                    ? "bg-primary text-foreground"
+                    : "text-muted hover:bg-surface hover:text-foreground border border-transparent hover:border-primary"
                 }`}
               >
                 <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
@@ -68,7 +68,7 @@ export default function Sidebar() {
         </div>
         <Link
           href="/settings"
-          className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted hover:bg-white hover:text-foreground border border-transparent hover:border-border transition-colors"
+          className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted hover:bg-surface hover:text-foreground border border-transparent hover:border-primary transition-colors"
         >
           <Settings size={18} strokeWidth={1.8} />
           <span className="font-mono text-[11px] uppercase tracking-wider">Settings</span>
@@ -80,9 +80,9 @@ export default function Sidebar() {
           <div className="relative">
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-3 w-full px-3 py-2.5 border border-border bg-white hover:border-foreground transition-colors"
+              className="flex items-center gap-3 w-full px-3 py-2.5 border border-border bg-surface hover:border-primary transition-colors"
             >
-              <div className="w-8 h-8 bg-foreground flex items-center justify-center text-white text-xs font-bold">
+              <div className="w-8 h-8 bg-primary flex items-center justify-center text-foreground text-xs font-bold">
                 {(user || "U").charAt(0).toUpperCase()}
               </div>
               <span className="text-sm font-medium text-foreground flex-1 text-left truncate">
@@ -91,7 +91,7 @@ export default function Sidebar() {
               <ChevronDown size={14} className="text-muted" />
             </button>
             {userMenuOpen && (
-              <div className="absolute bottom-full left-0 right-0 mb-1 border border-border bg-white">
+              <div className="absolute bottom-full left-0 right-0 mb-1 border border-border bg-surface">
                 <button
                   onClick={handleSignOut}
                   className="w-full text-left px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
@@ -104,7 +104,7 @@ export default function Sidebar() {
         ) : (
           <Link
             href="/auth"
-            className="flex items-center justify-center w-full px-3 py-2.5 bg-foreground hover:bg-primary-hover text-white text-sm font-medium transition-colors"
+            className="flex items-center justify-center w-full px-3 py-2.5 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-colors"
           >
             <span className="font-mono text-[11px] uppercase tracking-wider">Sign in</span>
           </Link>

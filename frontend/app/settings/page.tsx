@@ -55,7 +55,7 @@ export default function SettingsPage() {
         <UserAvatar />
       </div>
 
-      <div className="bg-white rounded-2xl border border-border p-6 space-y-6">
+      <div className="bg-surface border border-border p-6 space-y-6">
         <div>
           <label className="block text-sm font-medium text-foreground mb-2">Role</label>
           <div className="grid grid-cols-2 gap-2 max-w-xs">
@@ -63,7 +63,7 @@ export default function SettingsPage() {
               <button
                 key={r}
                 onClick={() => setRole(r)}
-                className={`py-2.5 rounded-xl text-sm font-medium border transition-all ${
+                className={`py-2.5 text-sm font-medium border transition-all ${
                   role === r
                     ? "bg-primary/10 text-primary border-primary/30"
                     : "bg-surface text-muted border-border hover:bg-primary/5"
@@ -82,8 +82,8 @@ export default function SettingsPage() {
               <button
                 key={l}
                 onClick={() => setLocaleState(l)}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold uppercase transition-all ${
-                  locale === l ? "bg-primary text-white" : "bg-surface text-muted hover:bg-primary/10"
+                className={`px-4 py-2 text-sm font-semibold uppercase transition-all ${
+                  locale === l ? "bg-primary text-foreground" : "bg-surface text-muted hover:bg-primary/10"
                 }`}
               >
                 {l}
@@ -94,13 +94,13 @@ export default function SettingsPage() {
 
         <button
           onClick={save}
-          className="bg-primary hover:bg-primary-hover text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-all"
+          className="bg-primary hover:bg-primary-hover text-foreground px-6 py-2.5 text-sm font-medium transition-all"
         >
           Save changes
         </button>
 
         {message && (
-          <div className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-xl p-3">
+          <div className="text-sm text-green-600 bg-green-50 border border-green-200 p-3">
             {message}
           </div>
         )}

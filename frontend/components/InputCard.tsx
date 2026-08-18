@@ -20,7 +20,7 @@ export default function InputCard({ onSubmit, placeholder = "Explain the Krebs c
   };
 
   return (
-    <div className="bg-white border border-border">
+    <div className="bg-surface border border-border">
       <div className="p-4">
         <textarea
           value={text}
@@ -45,7 +45,7 @@ export default function InputCard({ onSubmit, placeholder = "Explain the Krebs c
         <button
           onClick={handleSubmit}
           disabled={loading || !text.trim()}
-          className="flex items-center gap-2 bg-foreground hover:bg-primary-hover disabled:opacity-40 text-white px-4 py-2 text-sm font-medium transition-colors"
+          className="flex items-center gap-2 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground px-4 py-2 text-sm font-medium transition-colors"
         >
           Start
           <ArrowRight size={14} />

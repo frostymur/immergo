@@ -141,9 +141,13 @@ Relevant context:
 Judge whether the answer is substantially correct (core idea right, even if imperfect). Respond in strict JSON:
 - "correct": true or false
 - "feedback": short encouraging feedback. If correct, affirm and state the key point. If wrong, highlight the gap with a hint — DO NOT give the full solution.
-- "card": the next whiteboard step (same schema as before: type in "question"|"hint"|"example"|"formula"|"diagram", content, expected_actions, optional diagram). If correct, make it a short follow-up "question" deepening understanding.
+- "card": the next whiteboard step with the same schema as before:
+    - "type": one of "question" | "hint" | "example" | "formula" | "diagram"
+    - "content": concise text for that step
+    - "expected_actions": list of 2-3 action strings the student can take next
+    - "diagram": OPTIONAL object {{"nodes":[{{"id":"n1","label":"..."}}],"edges":[["n1","n2"]]}} for a small visual scheme (max 6 nodes)
 
-Output only valid JSON. Language: {lang.upper()}.
+If correct, make the next card a short follow-up "question" deepening understanding. Output only valid JSON. Language: {lang.upper()}.
 """
     response = await client.chat.completions.create(
         model=model,

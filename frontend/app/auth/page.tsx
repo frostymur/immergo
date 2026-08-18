@@ -66,24 +66,24 @@ function AuthPageInner() {
           {LOCALES.map((l) => (
             <button
               key={l}
-              onClick={() => setLocale(l)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold uppercase transition-all ${
-                locale === l ? "bg-primary text-white" : "bg-surface text-muted hover:bg-primary/10"
-              }`}
+            onClick={() => setLocale(l)}
+            className={`px-3 py-1 text-xs font-semibold uppercase transition-all ${
+              locale === l ? "bg-primary text-foreground" : "bg-surface text-muted hover:bg-primary/10"
+            }`}
             >
               {l}
             </button>
           ))}
         </div>
 
-        <div className="bg-white rounded-2xl border border-border p-6 shadow-sm">
-          <div className="flex border border-border rounded-xl mb-5 overflow-hidden">
+        <div className="bg-surface border border-border p-6 shadow-sm">
+          <div className="flex border border-border mb-5 overflow-hidden">
             {(["signup", "login"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
                 className={`flex-1 py-2.5 text-sm font-medium transition-all ${
-                  mode === m ? "bg-primary text-white" : "bg-surface text-muted hover:bg-primary/5"
+                  mode === m ? "bg-primary text-foreground" : "bg-surface text-muted hover:bg-primary/5"
                 }`}
               >
                 {m === "signup" ? t("auth.signup") : t("auth.login")}
@@ -100,7 +100,7 @@ function AuthPageInner() {
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+                    className="w-full border border-border px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
                     placeholder="Your name"
                   />
                 </div>
@@ -112,7 +112,7 @@ function AuthPageInner() {
                         type="button"
                         key={r}
                         onClick={() => setRole(r)}
-                        className={`py-2.5 rounded-xl text-sm font-medium border transition-all ${
+                        className={`py-2.5 text-sm font-medium border transition-all ${
                           role === r
                             ? "bg-primary/10 text-primary border-primary/30"
                             : "bg-surface text-muted border-border hover:bg-primary/5"
@@ -131,7 +131,7 @@ function AuthPageInner() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+                className="w-full border border-border px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
                 placeholder="you@example.com"
                 required
               />
@@ -142,7 +142,7 @@ function AuthPageInner() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full border border-border rounded-xl px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
+                className="w-full border border-border px-4 py-2.5 text-sm outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 transition-all"
                 placeholder="Enter your password"
                 required
               />
@@ -150,14 +150,14 @@ function AuthPageInner() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-medium transition-all"
+              className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 text-foreground py-2.5 text-sm font-medium transition-all"
             >
               {loading ? "..." : mode === "login" ? t("auth.login") : t("auth.signup")}
             </button>
           </form>
 
           {message && (
-            <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+            <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 p-3">
               {message}
             </div>
           )}

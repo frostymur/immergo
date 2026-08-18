@@ -2,13 +2,17 @@ import os
 import tempfile
 from contextlib import asynccontextmanager
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.db.database import close_pool
 from app.routers import ai
+from app.services.storage import LOCAL_STORAGE_ROOT
 
 
 @asynccontextmanager
@@ -32,6 +36,10 @@ app.add_middleware(
 )
 
 app.include_router(ai.router)
+
+# Serve local storage fallback files (PDFs, audio) when Supabase Storage is unreachable
+os.makedirs(LOCAL_STORAGE_ROOT, exist_ok=True)
+app.mount("/static", StaticFiles(directory=LOCAL_STORAGE_ROOT), name="static")
 
 
 @app.get("/api/health")
