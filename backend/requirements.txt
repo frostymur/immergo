@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+asyncpg
+pgvector
+openai
+langfuse
+edge-tts
+python-dotenv
+python-multipart

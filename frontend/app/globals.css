@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #F8F9FA;
+  --color-foreground: #09090B;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground antialiased font-sans;
+  }
+}
+
+@layer utilities {
+  .neo-border {
+    @apply border border-neutral-300;
+  }
+  .neo-box {
+    @apply border border-neutral-300 rounded-none bg-white p-6 shadow-sm;
+  }
+}
