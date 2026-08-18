@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 pydantic
-sqlalchemy
+pydantic-settings
+sqlalchemy[asyncio]
 asyncpg
 pgvector
 openai
@@ -9,3 +10,8 @@ langfuse
 edge-tts
 python-dotenv
 python-multipart
+pypdf
+httpx
+supabase
+pydub
+audioop-lts

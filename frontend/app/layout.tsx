@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import { LocaleProvider } from "@/components/LocaleProvider";
+import Sidebar from "@/components/Sidebar";
 
 const inter = Inter({ subsets: ["latin", "cyrillic"], variable: "--font-sans" });
-const mono = JetBrains_Mono({ subsets: ["latin", "cyrillic"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
-  title: "AI_STUDY_WORKSPACE // NEO-GOV",
-  description: "Modern Academic EdTech Platform",
+  title: "Immergo",
+  description: "Learn anything. Ace everything.",
 };
 
 export default function RootLayout({
@@ -17,8 +18,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${mono.variable} font-sans min-h-screen flex flex-col`}>
-        {children}
+      <body className={`${inter.variable} font-sans min-h-screen bg-white text-foreground`}>
+        <LocaleProvider>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <div className="flex-1 flex flex-col ml-0 lg:ml-[280px]">
+              {children}
+            </div>
+          </div>
+        </LocaleProvider>
       </body>
     </html>
   );
