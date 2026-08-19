@@ -1,0 +1,1 @@
+ALTER TABLE lesson_sessions ADD COLUMN IF NOT EXISTS plan jsonb;

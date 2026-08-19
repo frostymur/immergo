@@ -59,3 +59,157 @@ export async function fetchSummary(workspaceId: string, sourceId: string, lang: 
 export async function fetchHeatmap(workspaceId: string) {
   return apiFetch(`/api/ai/teacher/heatmap?workspace_id=${encodeURIComponent(workspaceId)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Live lesson (whiteboard) API
+// ---------------------------------------------------------------------------
+
+export type LessonBlock = {
+  kind:
+    | "section"
+    | "subsection"
+    | "note"
+    | "formula"
+    | "bullets"
+    | "steps"
+    | "table"
+    | "diagram"
+    | "choice"
+    | "task"
+    | "feedback"
+    | "student";
+  title?: string;
+  text?: string;
+  items?: string[];
+  options?: string[];
+  speak?: string;
+  correct?: boolean;
+  material?: boolean;
+  step?: number;
+  table?: { columns?: string[]; rows?: string[][] };
+  diagram?: {
+    nodes?: { id: string; label: string; shape?: "start" | "decision" | "end" }[];
+    edges?: [string, string, string?][];
+  };
+};
+
+export type LessonPlanStep = {
+  title: string;
+  detail?: string;
+};
+
+export type LessonEvent =
+  | { kind: "plan"; steps: LessonPlanStep[] }
+  | { kind: "session"; session_id: string; prompt: string }
+  | { kind: "block"; idx: number; block: LessonBlock }
+  | { kind: "student"; idx: number; block: LessonBlock }
+  | { kind: "done" }
+  | { kind: "error"; message: string };
+
+export interface LessonStreamHandlers {
+  onEvent: (event: LessonEvent) => void;
+  onError?: (error: Error) => void;
+}
+
+/**
+ * Parse a server-sent-event stream from a POST response, dispatching each
+ * `data:` payload as a LessonEvent. Resolves when the stream closes.
+ */
+async function consumeSseStream(res: Response, handlers: LessonStreamHandlers) {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = typeof parsed?.detail === "string" ? parsed.detail : text;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(`API ${res.status}: ${detail}`);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("Streaming not supported by this browser");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+    for (const frame of frames) {
+      const dataLine = frame
+        .split("\n")
+        .find((l) => l.startsWith("data:"));
+      if (!dataLine) continue;
+      try {
+        handlers.onEvent(JSON.parse(dataLine.slice(5).trim()) as LessonEvent);
+      } catch {
+        // Ignore malformed frames
+      }
+    }
+  }
+}
+
+export async function streamLessonStart(
+  workspaceId: string,
+  prompt: string,
+  lang: string,
+  handlers: LessonStreamHandlers,
+  signal?: AbortSignal
+) {
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/lesson/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace_id: workspaceId, prompt, lang }),
+      signal,
+    });
+    await consumeSseStream(res, handlers);
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
+export async function streamLessonMessage(
+  sessionId: string,
+  text: string,
+  handlers: LessonStreamHandlers,
+  signal?: AbortSignal
+) {
+  try {
+    const res = await fetch(`${API_BASE}/api/ai/lesson/${sessionId}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal,
+    });
+    await consumeSseStream(res, handlers);
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
+export async function fetchLesson(sessionId: string): Promise<{
+  session: { id: string; workspace_id: string; prompt: string; lang: string; status: string };
+  plan: LessonPlanStep[];
+  blocks: Array<{ idx: number; block: LessonBlock }>;
+}> {
+  return apiFetch(`/api/ai/lesson/${sessionId}`);
+}
+
+export async function fetchTtsAudio(text: string, lang: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/ai/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, lang }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`TTS ${res.status}: ${msg}`);
+  }
+  return res.blob();
+}
