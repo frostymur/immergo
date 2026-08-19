@@ -5,17 +5,26 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 
-_client: AsyncOpenAI | None = None
+_clients: dict[str, AsyncOpenAI] = {}
 
 
-def get_llm_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        # Prefer Alem endpoint if ALEM_LLM_API_KEY is present, otherwise OpenAI-compatible settings
-        api_key = settings.ALEM_LLM_API_KEY or settings.OPENAI_API_KEY
-        base_url = settings.ALEM_LLM_BASE_URL or settings.OPENAI_API_BASE
-        _client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-    return _client
+def get_llm_client(lang: str = "en") -> AsyncOpenAI:
+    # Kazakh lessons run on the ALEM endpoint (alemllm); Russian and English
+    # lessons run on the Qwen endpoint (qwen3-8).
+    group = "kz" if lang == "kz" else "other"
+    if group not in _clients:
+        if lang == "kz":
+            api_key = settings.ALEM_LLM_API_KEY
+            base_url = settings.ALEM_LLM_BASE_URL
+        else:
+            api_key = settings.QWEN_API_KEY
+            base_url = settings.QWEN_API_BASE
+        _clients[group] = AsyncOpenAI(api_key=api_key, base_url=base_url)
+    return _clients[group]
+
+
+def get_llm_model(lang: str = "en") -> str:
+    return settings.KZ_MODEL if lang == "kz" else settings.QWEN_MODEL
 
 
 VOICE_MAP = {
@@ -35,10 +44,11 @@ LLM_SYSTEM = {
 async def generate_podcast_script(
     context: str,
     lang: str = "en",
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> list[dict[str, str]]:
     """Generate a two-speaker JSON dialogue from source material."""
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     system = LLM_SYSTEM.get(lang, LLM_SYSTEM["en"])
     prompt = f"""{system}
 
@@ -77,10 +87,11 @@ async def socratic_response(
     question: str,
     context: str,
     lang: str = "en",
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Generate a Socratic tutor response with one guiding question and a whiteboard card."""
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     system = LLM_SYSTEM.get(lang, LLM_SYSTEM["en"])
     prompt = f"""{system}
 
@@ -122,10 +133,11 @@ async def evaluate_answer(
     answer: str,
     context: str,
     lang: str = "en",
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate a student's answer to a Socratic guiding question."""
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     system = LLM_SYSTEM.get(lang, LLM_SYSTEM["en"])
     prompt = f"""{system}
 
@@ -245,10 +257,11 @@ Output ONLY a JSON array of 4 to 6 objects, one per step, in the exact shape:
 async def generate_lesson_plan(
     prompt: str,
     lang: str = "en",
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> list[dict[str, str]]:
     """Generate a step-by-step lesson plan (list of step dicts) before teaching."""
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     lang_name = LESSON_LANG_NAMES.get(lang, "English")
     system = PLAN_SYSTEM.replace("{lang_name}", lang_name)
     user = f'The student wants to learn: "{prompt}"'
@@ -304,7 +317,7 @@ async def stream_lesson_turn(
     student_message: str | None = None,
     topic: str | None = None,
     plan: list[dict[str, str]] | None = None,
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream one lesson turn from the LLM as parsed whiteboard blocks.
 
@@ -312,7 +325,8 @@ async def stream_lesson_turn(
     as its line completes so the frontend can render/speak it immediately.
     Falls back to a non-streaming call if the endpoint rejects streaming.
     """
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     lang_name = LESSON_LANG_NAMES.get(lang, "English")
     system = LESSON_SYSTEM.replace("{lang_name}", lang_name)
 
@@ -422,10 +436,11 @@ async def stream_lesson_turn(
 async def generate_summary(
     context: str,
     lang: str = "en",
-    model: str = settings.LLM_MODEL,
+    model: str | None = None,
 ) -> str:
     """Generate a concise lesson summary from source chunks."""
-    client = get_llm_client()
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
     system = LLM_SYSTEM.get(lang, LLM_SYSTEM["en"])
     prompt = f"""{system}
 

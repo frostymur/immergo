@@ -47,5 +47,5 @@ async def health_check():
     return {
         "status": "ok",
         "system": "AI Study Workspace",
-        "llm_base": settings.OPENAI_API_BASE,
+        "llm_base": settings.QWEN_API_BASE,
     }

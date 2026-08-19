@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 export type Locale = "kz" | "ru" | "en";
 
@@ -117,19 +118,51 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
   },
 };
 
+function normalizeLocale(l: string | null | undefined): Locale {
+  return l === "kz" || l === "ru" ? l : "kz";
+}
+
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>("en");
+  const [locale, setLocaleState] = useState<Locale>("kz");
 
   useEffect(() => {
-    const saved = localStorage.getItem("lumi-locale") as Locale | null;
-    if (saved && ["kz", "ru", "en"].includes(saved)) {
-      setLocaleState(saved);
-    }
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("lang")
+          .eq("id", data.user.id)
+          .single();
+        if (!cancelled && profile?.lang) {
+          const lang = normalizeLocale(profile.lang as string);
+          setLocaleState(lang);
+          localStorage.setItem("lumi-locale", lang);
+          return;
+        }
+      }
+      if (!cancelled) {
+        const saved = localStorage.getItem("lumi-locale");
+        setLocaleState(normalizeLocale(saved));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setLocale = (l: Locale) => {
     setLocaleState(l);
     localStorage.setItem("lumi-locale", l);
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getUser();
+      if (data?.user) {
+        await supabase.from("profiles").update({ lang: l }).eq("id", data.user.id);
+      }
+    })();
   };
 
   const t = (key: string) => DICTIONARY[locale][key] || key;

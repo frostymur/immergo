@@ -13,8 +13,8 @@ def get_embeddings_client() -> AsyncOpenAI:
     if _client is None:
         # Prefer the dedicated Alem embedder key; fall back to the chat key
         # (which typically lacks embedder access).
-        api_key = settings.ALEM_EMBED_API_KEY or settings.OPENAI_API_KEY
-        base_url = settings.ALEM_EMBED_BASE_URL or settings.OPENAI_API_BASE
+        api_key = settings.ALEM_EMBED_API_KEY or settings.QWEN_API_KEY
+        base_url = settings.ALEM_EMBED_BASE_URL or settings.QWEN_API_BASE
         _client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     return _client
 

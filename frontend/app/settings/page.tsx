@@ -4,14 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
+import { useLocale, type Locale } from "@/components/LocaleProvider";
 
-const LOCALES = ["kz", "ru", "en"] as const;
+const LOCALES: Locale[] = ["kz", "ru"];
 
 export default function SettingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string>("student");
-  const [locale, setLocaleState] = useState<string>("en");
+  const { locale, setLocale } = useLocale();
   const [message, setMessage] = useState("");
   const supabase = createClient();
 
@@ -29,10 +30,10 @@ export default function SettingsPage() {
         .single();
       if (profile) {
         setRole(profile.role);
-        setLocaleState(profile.lang);
+        setLocale(profile.lang as Locale);
       }
     });
-  }, [router, supabase]);
+  }, [router, supabase, setLocale]);
 
   const save = async () => {
     setMessage("");
@@ -81,7 +82,7 @@ export default function SettingsPage() {
             {LOCALES.map((l) => (
               <button
                 key={l}
-                onClick={() => setLocaleState(l)}
+                onClick={() => setLocale(l)}
                 className={`px-4 py-2 text-sm font-semibold uppercase transition-all ${
                   locale === l ? "bg-primary text-foreground" : "bg-surface text-muted hover:bg-primary/10"
                 }`}

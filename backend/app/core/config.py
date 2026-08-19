@@ -9,12 +9,15 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_KEY: str = ""
 
-    # LLM provider (OpenAI-compatible Alem endpoint)
-    OPENAI_API_KEY: str = ""
-    OPENAI_API_BASE: str = "https://api.openai.com/v1"
+    # LLM provider — Kazakh lessons (alemllm)
     ALEM_LLM_API_KEY: str = ""
     ALEM_LLM_BASE_URL: str = "https://llm.alem.ai/v1"
-    LLM_MODEL: str = "qwen3-8"
+    KZ_MODEL: str = "alemllm"
+
+    # LLM provider — Russian / English lessons (qwen3-8)
+    QWEN_API_KEY: str = ""
+    QWEN_API_BASE: str = "https://llm.alem.ai/v1"
+    QWEN_MODEL: str = "qwen3-8"
 
     # Embeddings (separate Alem key with access to the "text-1024" embedder)
     ALEM_EMBED_API_KEY: str = ""
