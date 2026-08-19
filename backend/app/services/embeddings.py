@@ -11,16 +11,18 @@ _client: AsyncOpenAI | None = None
 def get_embeddings_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        # Use standard OpenAI for embeddings (requires separate key with embedding access)
-        # Fallback to Alem if OPENAI_API_KEY is not set
-        api_key = settings.OPENAI_API_KEY
-        base_url = settings.OPENAI_API_BASE
+        # Prefer the dedicated Alem embedder key; fall back to the chat key
+        # (which typically lacks embedder access).
+        api_key = settings.ALEM_EMBED_API_KEY or settings.OPENAI_API_KEY
+        base_url = settings.ALEM_EMBED_BASE_URL or settings.OPENAI_API_BASE
         _client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     return _client
 
 
-def hash_embedding(text: str, dim: int = 1536) -> List[float]:
+def hash_embedding(text: str, dim: int = 0) -> List[float]:
     """Fallback: generate deterministic pseudo-embedding from text hash."""
+    if dim <= 0:
+        dim = settings.EMBED_DIM
     h = hashlib.sha256(text.encode()).hexdigest()
     # Convert hex to float vector
     import struct
@@ -34,17 +36,26 @@ def hash_embedding(text: str, dim: int = 1536) -> List[float]:
     return floats[:dim]
 
 
-async def embed_texts(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
-    """Generate embeddings for a list of texts. Falls back to hash-based if API fails."""
-    try:
-        client = get_embeddings_client()
-        response = await client.embeddings.create(input=texts, model=model)
-        return [item.embedding for item in response.data]
-    except Exception as e:
-        print(f"Embedding API failed ({e}), using hash fallback")
-        return [hash_embedding(text) for text in texts]
+async def embed_texts(texts: List[str], model: str | None = None) -> List[List[float]]:
+    """Generate embeddings for a list of texts. Raises if the API call fails."""
+    client = get_embeddings_client()
+    response = await client.embeddings.create(
+        input=texts,
+        model=model or settings.EMBED_MODEL,
+    )
+    return [item.embedding for item in response.data]
 
 
-async def embed_text(text: str, model: str = "text-embedding-3-small") -> List[float]:
+async def embed_text(text: str, model: str | None = None) -> List[float]:
     result = await embed_texts([text], model=model)
     return result[0]
+
+
+async def embed_texts_or_hash(texts: List[str]) -> List[List[float]]:
+    """Embeddings for indexing: try the real API, fall back to hash vectors
+    so chunks are still stored and retrievable via keyword search."""
+    try:
+        return await embed_texts(texts)
+    except Exception:
+        print("Embedding API unavailable, storing hash vectors for keyword search")
+        return [hash_embedding(text) for text in texts]

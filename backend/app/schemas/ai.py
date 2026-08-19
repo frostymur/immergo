@@ -67,3 +67,24 @@ class SummaryResponse(BaseModel):
 class HeatmapResponse(BaseModel):
     workspace_id: Optional[str] = None
     nodes: list[dict[str, Any]]
+
+
+class LessonStartRequest(BaseModel):
+    workspace_id: str
+    prompt: str
+    lang: str = Field(default="en", pattern="^(kz|ru|en)$")
+
+
+class LessonMessageRequest(BaseModel):
+    text: str
+
+
+class LessonStateResponse(BaseModel):
+    session: dict[str, Any]
+    plan: list[dict[str, str]] = []
+    blocks: list[dict[str, Any]]
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    lang: str = Field(default="en", pattern="^(kz|ru|en)$")

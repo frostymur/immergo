@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     OPENAI_API_BASE: str = "https://api.openai.com/v1"
     ALEM_LLM_API_KEY: str = ""
     ALEM_LLM_BASE_URL: str = "https://llm.alem.ai/v1"
+    LLM_MODEL: str = "qwen3-8"
+
+    # Embeddings (separate Alem key with access to the "text-1024" embedder)
+    ALEM_EMBED_API_KEY: str = ""
+    ALEM_EMBED_BASE_URL: str = "https://llm.alem.ai/v1"
+    EMBED_MODEL: str = "text-1024"
+    EMBED_DIM: int = 1024
 
     # Observability
     LANGFUSE_PUBLIC_KEY: str = ""

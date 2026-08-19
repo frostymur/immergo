@@ -1,9 +1,10 @@
 import json
 import os
 import uuid
-from typing import Any
+from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.core.config import settings
 from app.db.database import (
@@ -11,6 +12,7 @@ from app.db.database import (
     fetch_many,
     fetch_one,
     insert_chunks,
+    keyword_search,
     md5_bytes,
     vector_search,
 )
@@ -18,26 +20,43 @@ from app.schemas.ai import (
     GeneratePodcastRequest,
     GeneratePodcastResponse,
     HeatmapResponse,
+    LessonMessageRequest,
+    LessonStartRequest,
+    LessonStateResponse,
     SocraticAnswerRequest,
     SocraticAnswerResponse,
     SocraticChatRequest,
     SocraticChatResponse,
     SummaryRequest,
     SummaryResponse,
+    TtsRequest,
     UploadAndIndexResponse,
 )
-from app.services.embeddings import embed_text, embed_texts
+from app.services.embeddings import embed_text, embed_texts_or_hash
 from app.services.llm import (
     evaluate_answer,
+    generate_lesson_plan,
     generate_podcast_script,
     generate_summary,
     socratic_response,
+    stream_lesson_turn,
 )
 from app.services.pdf_parser import chunk_text, parse_pdf
 from app.services.storage import upload_file
-from app.services.tts import generate_podcast_audio
+from app.services.tts import generate_podcast_audio, synthesize_text
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 @router.post("/upload-and-index", response_model=UploadAndIndexResponse)
@@ -98,7 +117,7 @@ async def upload_and_index(
     if not chunks:
         raise HTTPException(status_code=400, detail="No text extracted from PDF")
 
-    embeddings = await embed_texts(chunks)
+    embeddings = await embed_texts_or_hash(chunks)
     await insert_chunks(source_id, list(zip(chunks, embeddings)))
 
     return UploadAndIndexResponse(
@@ -288,6 +307,236 @@ async def summary(body: SummaryRequest):
         json.dumps({"summary": summary_text, "lang": body.lang}),
     )
     return SummaryResponse(summary=summary_text, cached=False)
+
+
+async def _lesson_context(workspace_id: str, query: str, limit: int = 6) -> tuple[str, bool]:
+    """RAG context for a lesson turn. Returns (context_text, used_material).
+
+    Uses semantic vector search when the API key has embedder access, and
+    falls back to keyword search when embeddings are unavailable.
+    """
+    try:
+        embedding = await embed_text(query)
+        records = await vector_search(workspace_id, embedding, limit=limit)
+    except Exception:
+        try:
+            records = await keyword_search(workspace_id, query, limit=limit)
+        except Exception:
+            return "", False
+    if not records:
+        return "", False
+    context = "\n\n---\n\n".join([r["content"] for r in records])
+    return context, True
+
+
+async def _append_block(session_id: str, idx: int, block: dict[str, Any]) -> None:
+    await execute(
+        """
+        INSERT INTO lesson_blocks (session_id, idx, block)
+        VALUES ($1, $2, $3::jsonb)
+        """,
+        uuid.UUID(session_id),
+        idx,
+        json.dumps(block, ensure_ascii=False),
+    )
+
+
+async def _load_lesson_blocks(session_id: str) -> list[dict[str, Any]]:
+    rows = await fetch_many(
+        """
+        SELECT block FROM lesson_blocks
+        WHERE session_id = $1
+        ORDER BY idx ASC
+        """,
+        uuid.UUID(session_id),
+    )
+    return [r["block"] if isinstance(r["block"], dict) else json.loads(r["block"]) for r in rows]
+
+
+async def _stream_lesson(
+    session_id: str,
+    history: list[dict[str, Any]],
+    context: str,
+    used_material: bool,
+    lang: str,
+    start_idx: int,
+    student_message: str | None = None,
+    topic: str | None = None,
+    plan: list[dict[str, str]] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Shared SSE generator: streams one tutor turn, persisting each block.
+
+    Blocks are tagged with a ``step`` index so the frontend can lay the board
+    out left-to-right, one column per lesson-plan step. A "section" block
+    starts a new column. A "plan_update" block revises the remaining steps of
+    the stored lesson plan (kept, not rendered on the board).
+    """
+    current_step = max((b.get("step", -1) for b in history), default=-1)
+    idx = start_idx
+    try:
+        async for block in stream_lesson_turn(
+            history=history,
+            context=context,
+            lang=lang,
+            student_message=student_message,
+            topic=topic,
+            plan=plan,
+        ):
+            if block.get("kind") == "plan_update":
+                new_steps = [
+                    s for s in (block.get("steps") or []) if isinstance(s, dict) and s.get("title")
+                ]
+                if new_steps:
+                    base_step = max((b.get("step", -1) for b in history), default=-1)
+                    merged = (list(plan[: base_step + 1]) if plan else []) + new_steps
+                    await execute(
+                        "UPDATE lesson_sessions SET plan = $2::jsonb WHERE id = $1",
+                        uuid.UUID(session_id),
+                        json.dumps(merged, ensure_ascii=False),
+                    )
+                    plan = merged
+                    yield _sse({"kind": "plan", "steps": merged})
+                continue
+            if block.get("kind") == "section":
+                current_step += 1
+            block["step"] = max(current_step, 0)
+            if used_material:
+                block["material"] = True
+            await _append_block(session_id, idx, block)
+            yield _sse({"kind": "block", "idx": idx, "block": block})
+            idx += 1
+        yield _sse({"kind": "done"})
+    except Exception as exc:
+        yield _sse({"kind": "error", "message": str(exc)})
+
+
+@router.post("/lesson/start")
+async def lesson_start(body: LessonStartRequest):
+    # Validate workspace exists
+    ws = await fetch_one("SELECT id FROM workspaces WHERE id = $1", uuid.UUID(body.workspace_id))
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    session_id = str(uuid.uuid4())
+
+    # Plan the lesson first, so the board is laid out step-by-step.
+    plan: list[dict[str, str]] = []
+    try:
+        plan = await generate_lesson_plan(body.prompt, lang=body.lang)
+    except Exception:
+        plan = []
+
+    await execute(
+        """
+        INSERT INTO lesson_sessions (id, workspace_id, prompt, lang, plan)
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        """,
+        uuid.UUID(session_id),
+        uuid.UUID(body.workspace_id),
+        body.prompt,
+        body.lang,
+        json.dumps(plan, ensure_ascii=False) if plan else None,
+    )
+
+    context, used_material = await _lesson_context(body.workspace_id, body.prompt)
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        yield _sse({"kind": "plan", "steps": plan})
+        yield _sse({"kind": "session", "session_id": session_id, "prompt": body.prompt})
+        async for event in _stream_lesson(
+            session_id=session_id,
+            history=[],
+            context=context,
+            used_material=used_material,
+            lang=body.lang,
+            start_idx=0,
+            topic=body.prompt,
+            plan=plan,
+        ):
+            yield event
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/lesson/{session_id}/message")
+async def lesson_message(session_id: str, body: LessonMessageRequest):
+    session = await fetch_one(
+        "SELECT id, workspace_id, lang, prompt, plan FROM lesson_sessions WHERE id = $1",
+        uuid.UUID(session_id),
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Lesson session not found")
+
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    history = await _load_lesson_blocks(session_id)
+    student_idx = len(history)
+    student_block = {"kind": "student", "text": text}
+    await _append_block(session_id, student_idx, student_block)
+
+    context, used_material = await _lesson_context(str(session["workspace_id"]), text)
+    lang = session["lang"] or "en"
+    plan: list[dict[str, str]] = []
+    raw_plan = session["plan"]
+    if raw_plan:
+        plan = json.loads(raw_plan) if isinstance(raw_plan, str) else raw_plan
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        yield _sse({"kind": "student", "idx": student_idx, "block": student_block})
+        async for event in _stream_lesson(
+            session_id=session_id,
+            history=history + [student_block],
+            context=context,
+            used_material=used_material,
+            lang=lang,
+            start_idx=student_idx + 1,
+            student_message=text,
+            topic=session["prompt"],
+            plan=plan,
+        ):
+            yield event
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.get("/lesson/{session_id}", response_model=LessonStateResponse)
+async def lesson_state(session_id: str):
+    session = await fetch_one(
+        """
+        SELECT id, workspace_id, prompt, lang, status, created_at, plan
+        FROM lesson_sessions WHERE id = $1
+        """,
+        uuid.UUID(session_id),
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Lesson session not found")
+
+    blocks = await _load_lesson_blocks(session_id)
+    raw_plan = session["plan"]
+    plan: list[dict[str, str]] = json.loads(raw_plan) if isinstance(raw_plan, str) else (raw_plan or [])
+    return LessonStateResponse(
+        session={
+            "id": str(session["id"]),
+            "workspace_id": str(session["workspace_id"]),
+            "prompt": session["prompt"],
+            "lang": session["lang"],
+            "status": session["status"],
+        },
+        plan=plan,
+        blocks=[{"idx": i, "block": b} for i, b in enumerate(blocks)],
+    )
+
+
+@router.post("/tts")
+async def tts(body: TtsRequest, background_tasks: BackgroundTasks):
+    try:
+        audio_path = await synthesize_text(body.text, body.lang)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"TTS failed: {exc}")
+    background_tasks.add_task(lambda: os.path.exists(audio_path) and os.remove(audio_path))
+    return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
 
 
 @router.get("/teacher/heatmap", response_model=HeatmapResponse)

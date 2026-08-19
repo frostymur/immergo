@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
@@ -35,7 +35,7 @@ LLM_SYSTEM = {
 async def generate_podcast_script(
     context: str,
     lang: str = "en",
-    model: str = "alemllm",
+    model: str = settings.LLM_MODEL,
 ) -> list[dict[str, str]]:
     """Generate a two-speaker JSON dialogue from source material."""
     client = get_llm_client()
@@ -77,7 +77,7 @@ async def socratic_response(
     question: str,
     context: str,
     lang: str = "en",
-    model: str = "alemllm",
+    model: str = settings.LLM_MODEL,
 ) -> dict[str, Any]:
     """Generate a Socratic tutor response with one guiding question and a whiteboard card."""
     client = get_llm_client()
@@ -122,7 +122,7 @@ async def evaluate_answer(
     answer: str,
     context: str,
     lang: str = "en",
-    model: str = "alemllm",
+    model: str = settings.LLM_MODEL,
 ) -> dict[str, Any]:
     """Evaluate a student's answer to a Socratic guiding question."""
     client = get_llm_client()
@@ -166,10 +166,263 @@ If correct, make the next card a short follow-up "question" deepening understand
     return json.loads(raw)
 
 
+LESSON_LANG_NAMES = {"kz": "Kazakh", "ru": "Russian", "en": "English"}
+
+LESSON_SYSTEM = """You are Lumi, a live AI tutor teaching a one-on-one lesson on a digital whiteboard.
+You teach by WRITING short notes on the whiteboard and SPEAKING a spoken explanation for each note (read aloud via TTS). The student watches the board and can answer or ask questions at any time.
+
+OUTPUT FORMAT — one JSON object per line (NDJSON). No markdown fences, no commentary, nothing outside the JSON lines. Each line is one whiteboard block:
+{"kind":"section","title":"...","speak":"..."}                       big topic heading (use once, at the start of a new topic)
+{"kind":"subsection","title":"...","speak":"..."}                    sub-topic heading
+{"kind":"note","text":"...","speak":"..."}                           short written note (1-2 lines max)
+{"kind":"formula","text":"3x + 5 = 17","speak":"..."}                formula/equation as plain-text math
+{"kind":"bullets","items":["...","..."],"speak":"..."}               2-4 bullet points
+{"kind":"steps","items":["...","..."],"speak":"..."}                 numbered worked steps
+{"kind":"table","columns":["Col A","Col B"],"rows":[["a1","b1"],["a2","b2"]],"speak":"..."}   comparison/list table (max 5 columns, 6 rows)
+{"kind":"diagram","nodes":[{"id":"n1","label":"Start","shape":"start"},{"id":"n2","label":"x > 0?","shape":"decision"},{"id":"n3","label":"End","shape":"end"}],"edges":[["n1","n2"],["n2","n3","yes"],["n2","n4","no"]],"speak":"..."}   flowchart/branching diagram (max 8 nodes; shape: start|end|decision; short labels; optional edge labels)
+{"kind":"task","text":"...","speak":"..."}                           a task/question the STUDENT must solve
+{"kind":"feedback","text":"...","correct":true,"speak":"..."}        evaluation of the student's answer ("correct": true/false)
+{"kind":"choice","title":"What's next?","options":["Practice more","Go deeper","Move on"],"speak":"..."}   offer the student a choice of next direction (then "end" and wait for their pick)
+{"kind":"plan_update","steps":[{"title":"...","detail":"..."}]}   (optional, only at the very start of a turn) revise the REMAINING lesson steps
+{"kind":"end"}                                                       end of your turn — ALWAYS the last line
+
+EXAMPLE — the end of a turn that finishes a step and offers a branch:
+{"kind":"feedback","text":"Exactly — acceleration halves.","correct":true,"speak":"Exactly right. If the mass doubles, the acceleration halves."}
+{"kind":"choice","title":"What's next?","options":["Practice one more","Go deeper into F = ma","Move to the next topic"],"speak":"Where would you like to go next?"}
+{"kind":"end"}
+
+RULES:
+- Written "text"/"items" are concise board notes, not essays. "speak" is natural spoken language (1-3 sentences) that explains the block — never just reads it verbatim. Blocks that need no voice (e.g. "end") omit "speak".
+- Use "diagram" blocks for processes, flows and decision trees (branching); keep labels short and ids unique. Use "table" blocks for comparisons and listings. "speak" briefly explains the visual.
+- Teach one sub-topic per turn: a few explanation blocks, then ONE "task" block, then "end" and wait for the student. Never answer your own task.
+- SOCRATIC METHOD: when the student answers a task, open with a "feedback" block. If the answer is wrong or incomplete NEVER reveal the solution — point at the gap and follow with a guiding "note"/"task". If correct ("correct": true), confirm briefly, then continue the lesson with the next sub-topic.
+- ADAPTIVE: the lesson plan is a guide, not a contract. Stay in the current step while the student struggles (extra notes/tasks) and only advance once it is learned; every advance opens a new "section". If the lesson takes an unexpected turn (student confused, wants more depth, topic changes), revise the REMAINING steps with a "plan_update" block at the start of a turn — the system keeps already-DONE steps, so only list what still lies ahead.
+- CHOICE: when a step is COMPLETE (usually right after the student solved a task correctly), END your turn with a "choice" block so the student picks the next direction, then "end" and wait. If the student is still wrong or incomplete, keep teaching in the current step instead — do not offer a choice yet.
+- When the student asks a question, answer it with note/formula/steps blocks, then continue the lesson.
+- At most 8 blocks per turn (excluding "end").
+- Write and speak ONLY in {lang_name}.
+- When MATERIAL from the student's own documents is provided, ground the lesson in it.
+"""
+
+
+def serialize_lesson_history(blocks: list[dict[str, Any]], limit: int = 60) -> str:
+    """Render stored lesson blocks into a compact transcript for the LLM."""
+    lines: list[str] = []
+    for b in blocks[-limit:]:
+        kind = b.get("kind")
+        if kind == "student":
+            lines.append(f"STUDENT: {b.get('text', '')}")
+        elif kind == "task":
+            lines.append(f"LUMI (task for student): {b.get('text', '')}")
+        elif kind == "feedback":
+            verdict = "correct" if b.get("correct") else "not quite"
+            lines.append(f"LUMI (feedback, {verdict}): {b.get('text', '')}")
+        elif kind in ("section", "subsection"):
+            lines.append(f"LUMI (heading): {b.get('title', '')}")
+        elif kind in ("note", "formula"):
+            lines.append(f"LUMI ({kind}): {b.get('text', '')}")
+        elif kind in ("bullets", "steps"):
+            lines.append(f"LUMI ({kind}): " + " | ".join(b.get("items", [])))
+        elif kind == "table":
+            lines.append(f"LUMI (table): columns={b.get('columns', [])} rows={b.get('rows', [])}")
+        elif kind == "diagram":
+            node_repr = "; ".join(f"{n.get('id')}={n.get('label')}" for n in b.get("nodes", []))
+            edge_repr = "; ".join("->".join(map(str, e)) for e in b.get("edges", []))
+            lines.append(f"LUMI (diagram): nodes[{node_repr}] edges[{edge_repr}]")
+        elif kind == "choice":
+            lines.append(f"LUMI (choice): {b.get('title', '')} options={b.get('options', [])}")
+    return "\n".join(lines)
+
+
+PLAN_SYSTEM = """You are a lesson planner. Given a student's request, design a step-by-step lesson plan.
+Output ONLY a JSON array of 4 to 6 objects, one per step, in the exact shape:
+[{"title": "Short heading for the whiteboard column (2-6 words)", "detail": "One line on what the student will learn or practice in this step"}]
+- Steps build on each other and cover the whole requested topic.
+- Write the plan ONLY in {lang_name}.
+"""
+
+
+async def generate_lesson_plan(
+    prompt: str,
+    lang: str = "en",
+    model: str = settings.LLM_MODEL,
+) -> list[dict[str, str]]:
+    """Generate a step-by-step lesson plan (list of step dicts) before teaching."""
+    client = get_llm_client()
+    lang_name = LESSON_LANG_NAMES.get(lang, "English")
+    system = PLAN_SYSTEM.replace("{lang_name}", lang_name)
+    user = f'The student wants to learn: "{prompt}"'
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.5,
+    )
+    raw = (response.choices[0].message.content or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(plan, list):
+        return []
+    steps: list[dict[str, str]] = []
+    for item in plan:
+        if isinstance(item, dict) and item.get("title"):
+            steps.append(
+                {
+                    "title": str(item["title"]),
+                    "detail": str(item.get("detail", "") or ""),
+                }
+            )
+    return steps
+
+
+def _parse_block_line(line: str) -> dict[str, Any] | None:
+    """Parse one NDJSON line into a block dict, or None if not a valid block."""
+    line = line.strip()
+    if not line or not line.startswith("{"):
+        return None
+    try:
+        block = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(block, dict) or "kind" not in block:
+        return None
+    return block
+
+
+async def stream_lesson_turn(
+    history: list[dict[str, Any]],
+    context: str,
+    lang: str = "en",
+    student_message: str | None = None,
+    topic: str | None = None,
+    plan: list[dict[str, str]] | None = None,
+    model: str = settings.LLM_MODEL,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Stream one lesson turn from the LLM as parsed whiteboard blocks.
+
+    The model emits NDJSON (one block per line); each block is yielded as soon
+    as its line completes so the frontend can render/speak it immediately.
+    Falls back to a non-streaming call if the endpoint rejects streaming.
+    """
+    client = get_llm_client()
+    lang_name = LESSON_LANG_NAMES.get(lang, "English")
+    system = LESSON_SYSTEM.replace("{lang_name}", lang_name)
+
+    if plan:
+        current_step = max((b.get("step", -1) for b in history), default=-1)
+        plan_lines = "\n".join(
+            ("DONE " if i < current_step else "CURRENT " if i == current_step else "upcoming ")
+            + f"{i + 1}. {s['title']}: {s['detail']}"
+            for i, s in enumerate(plan)
+        )
+        system += (
+            "\n\nLESSON PLAN (marked DONE / CURRENT / upcoming) — follow the steps "
+            "in order but ADAPT: stay in the current step while the student "
+            "struggles; advance once it is learned, opening a \"section\" block "
+            "each time. You may revise the REMAINING steps with a \"plan_update\" "
+            "block at the start of a turn.\n"
+            f"LESSON PLAN:\n{plan_lines}"
+        )
+
+    transcript = serialize_lesson_history(history)
+    parts = []
+    if topic:
+        parts.append(f'THE TOPIC OF THIS LESSON IS: "{topic}". Teach THIS topic — stay on it in every block.')
+    if transcript:
+        parts.append(f"LESSON SO FAR:\n{transcript}")
+    if student_message:
+        parts.append(f'THE STUDENT JUST SAID: "{student_message}"')
+    else:
+        parts.append("Start the lesson now: greet the student in one short spoken line, then begin teaching the requested topic.")
+    if context:
+        parts.append(f"MATERIAL from the student's documents:\n{context[:8000]}")
+    user_prompt = "\n\n".join(parts)
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    yielded_any = False
+    stream = None
+    completed = False
+    try:
+        stream = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.6,
+            stream=True,
+        )
+        # Buffer raw deltas and yield one parsed block per completed NDJSON
+        # line. After the "end" marker we keep draining (without yielding) so
+        # the HTTP stream is always fully consumed — abandoning it mid-flight
+        # leaves a suspended generator that httpcore2 fails to aclose().
+        buffer = ""
+        saw_end = False
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if not delta:
+                continue
+            buffer += delta
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                block = _parse_block_line(line)
+                if block is None:
+                    continue
+                if block.get("kind") == "end":
+                    saw_end = True
+                    continue
+                if saw_end:
+                    continue
+                yielded_any = True
+                yield block
+        completed = True
+        if not saw_end:
+            block = _parse_block_line(buffer)
+            if block is not None and block.get("kind") != "end":
+                yield block
+    except Exception:
+        if yielded_any:
+            # Stream died mid-turn: keep the blocks already written and stop.
+            return
+        # Fallback: non-streaming call (endpoint may not support SSE streaming)
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.6,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+        for line in raw.splitlines():
+            block = _parse_block_line(line)
+            if block is None:
+                continue
+            if block.get("kind") == "end":
+                return
+            yield block
+    finally:
+        if stream is not None and not completed:
+            try:
+                await stream.close()
+            except Exception:
+                pass
+
+
 async def generate_summary(
     context: str,
     lang: str = "en",
-    model: str = "alemllm",
+    model: str = settings.LLM_MODEL,
 ) -> str:
     """Generate a concise lesson summary from source chunks."""
     client = get_llm_client()

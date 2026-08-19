@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from typing import Any, Optional
 
@@ -8,11 +9,32 @@ from app.core.config import settings
 _pool: Optional[asyncpg.Pool] = None
 
 
+def _conn_kwargs() -> dict[str, Any]:
+    """Parse DATABASE_URL into asyncpg kwargs.
+
+    Manual parsing (instead of passing the DSN through) so passwords containing
+    characters like '[' or ']' don't break urllib's bracketed-host validation.
+    """
+    dsn = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    rest = dsn[len("postgresql://"):]
+    creds, _, hostpart = rest.rpartition("@")
+    user, _, password = creds.partition(":")
+    hostport, _, database = hostpart.partition("/")
+    host, _, port = hostport.partition(":")
+    return {
+        "user": user or "postgres",
+        "password": password,
+        "host": host or "localhost",
+        "port": int(port or "5432"),
+        "database": database or "postgres",
+    }
+
+
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         _pool = await asyncpg.create_pool(
-            settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://"),
+            **_conn_kwargs(),
             min_size=2,
             max_size=10,
         )
@@ -79,6 +101,39 @@ async def vector_search(workspace_id: str, embedding: list[float], limit: int = 
             LIMIT $3
             """,
             embedding_str,
+            uuid.UUID(workspace_id),
+            limit,
+        )
+
+
+async def keyword_search(workspace_id: str, query: str, limit: int = 5) -> list[asyncpg.Record]:
+    """Rank document chunks by keyword overlap (no embeddings required).
+
+    Uses Postgres full-text search with the 'simple' config so it works for
+    any script (English, Russian, Kazakh). Tokens are OR-ed together so a full
+    sentence still matches chunks that share a few words, ranked by relevance.
+    """
+    tokens = re.findall(r"\w+", query.lower(), re.UNICODE)
+    tokens = [t for t in tokens if len(t) >= 2][:12]
+    if not tokens:
+        return []
+    tsquery = " | ".join(f"'{t}'" for t in tokens)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT dc.content, dc.source_id, s.file_name,
+                   ts_rank(to_tsvector('simple', dc.content),
+                           to_tsquery('simple', $1)) AS similarity
+            FROM document_chunks dc
+            JOIN sources s ON s.id = dc.source_id
+            JOIN workspaces w ON w.id = s.workspace_id
+            WHERE w.id = $2
+              AND to_tsvector('simple', dc.content) @@ to_tsquery('simple', $1)
+            ORDER BY similarity DESC
+            LIMIT $3
+            """,
+            tsquery,
             uuid.UUID(workspace_id),
             limit,
         )
