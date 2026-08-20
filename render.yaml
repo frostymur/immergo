@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: immergo-backend
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        value: https://epdeoevjvbvkytxyjpmp.supabase.co
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ALEM_LLM_API_KEY
+        sync: false
+      - key: ALEM_LLM_BASE_URL
+        value: https://llm.alem.ai/v1
+      - key: KZ_MODEL
+        value: alemllm
+      - key: QWEN_API_KEY
+        sync: false
+      - key: QWEN_API_BASE
+        value: https://llm.alem.ai/v1
+      - key: QWEN_MODEL
+        value: qwen3-8
+      - key: ALEM_EMBED_API_KEY
+        sync: false
+      - key: ALEM_EMBED_BASE_URL
+        value: https://llm.alem.ai/v1
+      - key: EMBED_MODEL
+        value: text-1024
+      - key: EMBED_DIM
+        value: "1024"
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://a1-langfuse1.alem.ai
+      - key: LANGFUSE_BASE_URL
+        value: https://a1-langfuse1.alem.ai
+      - key: CORS_ORIGINS
+        value: http://localhost:3000,https://immergo.vercel.app

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "https://cloud.langfuse.com"
     LANGFUSE_BASE_URL: str = "https://cloud.langfuse.com"
 
+    # CORS — comma-separated origins, e.g. "http://localhost:3000,https://immergo.vercel.app"
+    CORS_ORIGINS: str = "http://localhost:3000"
+
     # TTS / Audio
     TTS_CHUNK_SIZE: int = 1000
 
