@@ -116,7 +116,11 @@ export default function AuthCard() {
         }
         window.location.href = "/";
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { role } },
+        });
         if (error) throw error;
         if (data.user) {
           await applyRole(data.user.id);

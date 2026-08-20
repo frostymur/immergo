@@ -50,7 +50,7 @@ export default function MyClassesPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <header className="flex items-center justify-between px-6 py-4 border-b border-border">
-        <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("my.classes")} ]</div>
+        <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("nav.lessons")} ]</div>
       </header>
 
       <main className="flex-1 p-6">
@@ -72,7 +72,7 @@ export default function MyClassesPage() {
           ) : (
             <div className="border border-border bg-surface">
               <div className="px-4 py-3 border-b border-border font-mono text-[10px] uppercase tracking-widest text-muted">
-                [ {t("my.classes")} ]
+                [ {t("nav.lessons")} ]
               </div>
               <div className="divide-y divide-border">
                 {classes.map((c) => (

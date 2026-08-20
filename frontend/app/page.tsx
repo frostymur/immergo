@@ -18,6 +18,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classesLoading, setClassesLoading] = useState(true);
+  const [lessons, setLessons] = useState<{ id: string; prompt: string; created_at: string }[]>([]);
   const supabase = createClient();
   const { role, loading: roleLoading } = useUserRole();
 
@@ -51,6 +52,16 @@ export default function Home() {
         return;
       }
       const userId = userData.user.id;
+      const roleStr = userData.user.user_metadata?.role;
+
+      if (roleStr !== "teacher") {
+        const { data: sessions } = await supabase
+          .from("lesson_sessions")
+          .select("id, prompt, created_at")
+          .order("created_at", { ascending: false })
+          .limit(10);
+        if (sessions) setLessons(sessions);
+      }
 
       // Owned workspaces
       const { data: owned } = await supabase
@@ -143,6 +154,50 @@ export default function Home() {
             </div>
           )}
 
+          {/* Recent Lessons */}
+          {!classesLoading && role !== "teacher" ? (
+            <div className="border border-border bg-surface">
+              <div className="px-4 py-3 border-b border-border font-mono text-[10px] uppercase tracking-widest text-muted">
+                [ {t("nav.lessons")} ]
+              </div>
+              {lessons.length > 0 ? (
+                <div className="divide-y divide-border">
+                  {lessons.map((l) => (
+                    <Link
+                      key={l.id}
+                      href={`/workspace?lesson=${l.id}`}
+                      className="flex items-center justify-between p-4 hover:bg-surface-hover transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <BookOpen size={14} className="text-muted" />
+                        <div>
+                          <div className="text-sm font-medium">{l.prompt}</div>
+                          <div className="text-xs text-muted">
+                            {new Date(l.created_at).toLocaleDateString(
+                              locale === "kz" ? "kk-KZ" : locale === "ru" ? "ru-RU" : "en-US",
+                              { day: "numeric", month: "long" }
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="font-mono text-[10px] uppercase tracking-widest text-muted border border-border px-2 py-0.5">
+                        {locale === "kz" ? "Жалғастыру" : locale === "ru" ? "Продолжить" : "Resume"}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-6 text-center text-sm text-muted">
+                  {locale === "kz"
+                    ? "Сіз әлі ешқандай сабақ бастамадыңыз."
+                    : locale === "ru"
+                    ? "Вы еще не начали ни одного урока. Введите тему выше!"
+                    : "You haven't started any lessons yet. Enter a topic above!"}
+                </div>
+              )}
+            </div>
+          ) : null}
+
           {/* My classes */}
           {classesLoading ? (
             <div className="flex items-center justify-center gap-2 text-sm text-muted py-2">
@@ -158,7 +213,7 @@ export default function Home() {
                   <Link
                     key={c.id}
                     href={c.role === "owner" ? "/teacher" : `/workspace?workspace_id=${c.id}`}
-                    className="flex items-center justify-between p-4 hover:bg-surface transition-colors"
+                    className="flex items-center justify-between p-4 hover:bg-surface-hover transition-colors"
                   >
                     <div className="flex items-center gap-3">
                       <BookOpen size={14} className="text-muted" />

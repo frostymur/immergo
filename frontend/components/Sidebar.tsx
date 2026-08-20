@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useLocale } from "@/components/LocaleProvider";
 import { useUserRole } from "@/lib/useUserRole";
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useLocale();
@@ -19,6 +19,7 @@ export default function Sidebar() {
 
   const navItems = [
     { href: "/", label: t("landing.title") },
+    { href: "/dashboard", label: t("nav.dashboard") },
     { href: "/my-classes", label: t("nav.lessons") },
     ...(role === "teacher" ? [{ href: "/teacher", label: t("nav.teacher") }] : []),
   ];
@@ -32,11 +33,16 @@ export default function Sidebar() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    onMobileClose?.();
     router.push("/");
   };
 
   return (
-    <aside className="fixed top-0 left-0 h-screen w-[280px] bg-sidebar-bg border-r border-border flex flex-col z-50">
+    <aside
+      className={`fixed top-0 left-0 h-screen w-[280px] bg-sidebar-bg border-r border-border flex flex-col z-50 transition-transform duration-200 lg:translate-x-0 ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       <div className="px-6 pt-8 pb-6 border-b border-border">
         <span className="font-mono text-lg font-semibold tracking-tight">immergo</span>
         <div className="font-mono text-[10px] uppercase tracking-widest text-muted mt-0.5">
@@ -52,6 +58,7 @@ export default function Sidebar() {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={onMobileClose}
                 className={`flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
                   isActive
                     ? "bg-primary text-foreground"
@@ -71,6 +78,7 @@ export default function Sidebar() {
         </div>
         <Link
           href="/settings"
+          onClick={onMobileClose}
           className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted hover:bg-surface hover:text-foreground border border-transparent hover:border-primary transition-colors"
         >
           <Settings size={18} strokeWidth={1.8} />
@@ -107,6 +115,7 @@ export default function Sidebar() {
         ) : (
           <Link
             href="/auth"
+            onClick={onMobileClose}
             className="flex items-center justify-center w-full px-3 py-2.5 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-colors"
           >
             <span className="font-mono text-[11px] uppercase tracking-wider">{t("auth.login")}</span>

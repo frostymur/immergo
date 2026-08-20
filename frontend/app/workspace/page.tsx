@@ -65,6 +65,7 @@ function WorkspaceInner() {
   const topic = searchParams.get("topic") || "";
   const workspaceIdParam = searchParams.get("workspace_id");
   const lessonParam = searchParams.get("lesson");
+  const lessonLevel = (searchParams.get("level") || "intermediate") as "beginner" | "intermediate" | "advanced";
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [lessonTitle, setLessonTitle] = useState<string>(topic);
@@ -332,7 +333,8 @@ function WorkspaceInner() {
           },
           onError: handleStreamError,
         },
-        controller.signal
+        controller.signal,
+        lessonLevel
       ).then(() => {
         if (!sawDone && !controller.signal.aborted) handleStreamError();
       });
@@ -1190,21 +1192,34 @@ function WorkspaceInner() {
                   block's cell is fixed by its index, so revealed blocks never
                   reflow other columns. */}
               <div className="flex items-start gap-8 px-8">
-                {columns.map((col, ci) => (
-                  <div
-                    key={ci}
-                    data-step={ci}
-                    className={`py-8 grid grid-flow-col auto-cols-[440px] grid-rows-[repeat(6,auto)] gap-x-8 gap-y-4 ${
-                      ci === currentStep ? "bg-board-task/5" : ""
-                    }`}
-                  >
-                    {col.blocks.map((b, i) => (
-                      <div key={col.start + i} className="w-[440px]">
-                        {renderBlock(b, col.start + i)}
-                      </div>
-                    ))}
-                  </div>
-                ))}
+                {columns.map((col, ci) => {
+                  const chunks = [];
+                  for (let i = 0; i < col.blocks.length; i += 6) {
+                    chunks.push(col.blocks.slice(i, i + 6));
+                  }
+                  return (
+                    <div
+                      key={ci}
+                      data-step={ci}
+                      className={`py-8 flex items-start gap-8 ${
+                        ci === currentStep ? "bg-board-task/5" : ""
+                      }`}
+                    >
+                      {chunks.map((chunk, cidx) => (
+                        <div key={cidx} className="flex flex-col w-[440px] gap-4">
+                          {chunk.map((b, i) => {
+                            const globalIdx = col.start + cidx * 6 + i;
+                            return (
+                              <div key={globalIdx} className="w-[440px]">
+                                {renderBlock(b, globalIdx)}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
                 {streaming && blocks.length > 0 && (
                   <div className="shrink-0 px-8 py-8 flex items-center gap-2 text-muted w-[440px]">
                     <Loader2 size={14} className="animate-spin" />

@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
@@ -372,6 +373,7 @@ async def _stream_lesson(
     student_message: str | None = None,
     topic: str | None = None,
     plan: list[dict[str, str]] | None = None,
+    level: str = "intermediate",
 ) -> AsyncGenerator[str, None]:
     """Shared SSE generator: streams one tutor turn, persisting each block.
 
@@ -390,6 +392,7 @@ async def _stream_lesson(
             student_message=student_message,
             topic=topic,
             plan=plan,
+            level=level,
         ):
             if block.get("kind") == "plan_update":
                 new_steps = [
@@ -461,6 +464,7 @@ async def lesson_start(body: LessonStartRequest):
             start_idx=0,
             topic=body.prompt,
             plan=plan,
+            level=body.level,
         ):
             yield event
 
@@ -631,10 +635,25 @@ async def diagnostic_evaluate(body: DiagnosticEvaluateRequest):
 
 @router.post("/roadmap", response_model=RoadmapResponse)
 async def roadmap(body: RoadmapRequest):
-    steps = await generate_roadmap(topic=body.topic, goal=body.goal, lang=body.lang)
-    if not steps:
+    result = await generate_roadmap(
+        topic=body.topic,
+        goal=body.goal,
+        lang=body.lang,
+        level=body.level,
+        weak_topics=body.weak_topics,
+    )
+    if not result.get("stages"):
         raise HTTPException(status_code=502, detail="Roadmap generation failed")
-    return RoadmapResponse(topic=body.topic, steps=steps)
+    total_weeks = result.get("total_weeks", 0) or len(result["stages"])
+    deadline = (datetime.now(timezone.utc) + timedelta(weeks=total_weeks)).isoformat()
+    return RoadmapResponse(
+        topic=body.topic,
+        goal=body.goal,
+        level=body.level,
+        stages=result["stages"],
+        total_weeks=total_weeks,
+        deadline=deadline,
+    )
 
 
 @router.get("/source/{source_id}/file")

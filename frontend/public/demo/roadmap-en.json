@@ -1,30 +1,65 @@
 {
   "topic": "Kinematics",
-  "steps": [
+  "goal": "ent",
+  "level": "intermediate",
+  "total_weeks": 8,
+  "deadline": null,
+  "stages": [
     {
-      "title": "Basics of motion",
-      "detail": "Displacement, velocity, acceleration.",
-      "duration": "1 week"
+      "title": "Fundamentals of Motion",
+      "topics": ["Displacement", "Velocity", "Acceleration", "Coordinate systems", "Trajectory"],
+      "material": "Read the kinematics intro and learn to tell the vector quantities apart.",
+      "check": "Solve 10 problems, get 8 right, and show velocity/acceleration vectors on a graph.",
+      "duration": "7 days"
     },
     {
-      "title": "Uniform motion",
-      "detail": "Equations of uniform rectilinear motion.",
-      "duration": "4 days"
+      "title": "Uniform Motion",
+      "topics": ["Uniform straight-line motion", "Velocity graphs", "Calculating displacement", "x(t) equation"],
+      "material": "Derive x = x₀ + vt and sketch motion graphs in different directions.",
+      "check": "Solve a catch-up problem at three difficulty levels.",
+      "duration": "7 days"
     },
     {
-      "title": "Uniformly accelerated motion",
-      "detail": "Acceleration formulas and graphs.",
-      "duration": "1 week"
+      "title": "Uniform Acceleration",
+      "topics": ["Acceleration formulas", "s = v₀t + at²/2", "v(t), a(t) graphs", "Average speed"],
+      "material": "Derive the core kinematics formulas and write one problem for each.",
+      "check": "Find the displacement from a v(t) graph (3 problems).",
+      "duration": "7 days"
     },
     {
-      "title": "Free fall",
-      "detail": "Gravity acceleration and vertical motion problems.",
-      "duration": "4 days"
+      "title": "Free Fall",
+      "topics": ["Acceleration g", "Vertical throw", "Time of fall", "Maximum height"],
+      "material": "Solve problems with g = 9.8 m/s² and understand when to ignore air resistance.",
+      "check": "5 problems on flight time and height of a thrown body.",
+      "duration": "7 days"
     },
     {
-      "title": "UNT problems",
-      "detail": "Solve typical UNT kinematics tasks.",
-      "duration": "1 week"
+      "title": "Curvilinear Motion",
+      "topics": ["Horizontal throw", "Circular motion", "Centripetal acceleration", "Angular velocity"],
+      "material": "Review the horizontal-throw and circular-motion formulas.",
+      "check": "Solve a horizontal-throw problem and derive the centripetal acceleration formula.",
+      "duration": "7 days"
+    },
+    {
+      "title": "Problem Drill",
+      "topics": ["Kinematics problem sets", "Graph problems", "Typical mistakes", "Solution algorithms"],
+      "material": "Solve at least 30 kinematics problems (textbook + online banks).",
+      "check": "10 random bank problems against the clock (score 70%+).",
+      "duration": "7 days"
+    },
+    {
+      "title": "UNT-format Practice",
+      "topics": ["UNT tasks", "Time management", "Alternative answers", "Error analysis"],
+      "material": "Collect and analyze past UNT kinematics tasks.",
+      "check": "20-question test: 16+ correct within the time limit.",
+      "duration": "7 days"
+    },
+    {
+      "title": "Final Mock Test",
+      "topics": ["All kinematics", "Hard combined problems", "Modeling", "Wrap-up"],
+      "material": "Review every topic and solve hard combined problems.",
+      "check": "Final UNT-format test: 20+ of 25 correct — you are ready!",
+      "duration": "7 days"
     }
   ]
 }

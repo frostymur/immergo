@@ -1,32 +1,16 @@
-[
-  {
-    "q": "A body of mass 2 kg moves at 3 m/s. What is its kinetic energy?",
-    "options": ["3 J", "6 J", "9 J", "12 J"],
-    "answer": 2,
-    "explain": "E = mv²/2 = 2·9/2 = 9 J"
-  },
-  {
-    "q": "What is the SI unit of force?",
-    "options": ["Watt", "Newton", "Pascal", "Joule"],
-    "answer": 1,
-    "explain": "Force is measured in newtons (N)."
-  },
-  {
-    "q": "For a body at rest to stay at rest, the net force on it must be...",
-    "options": ["Zero", "Maximum", "Equal to its weight", "Constant"],
-    "answer": 0,
-    "explain": "Newton's first law: balanced forces keep a body at rest."
-  },
-  {
-    "q": "How far does a body travel in 5 s moving uniformly at 10 m/s?",
-    "options": ["25 m", "50 m", "100 m", "2 m"],
-    "answer": 1,
-    "explain": "s = v·t = 10·5 = 50 m"
-  },
-  {
-    "q": "A 2 A current flows through a 10 Ω resistor. What is the voltage?",
-    "options": ["5 V", "12 V", "20 V", "0.2 V"],
-    "answer": 2,
-    "explain": "U = I·R = 2·10 = 20 V"
-  }
-]
+{
+  "questions": [
+    {"q": "What is displacement?", "options": ["Distance travelled", "A vector from the start to the end position", "Speed of the body", "Time of motion"], "answer": 1, "explain": "Displacement is a vector quantity independent of the path.", "topic": "Fundamentals of Motion"},
+    {"q": "In uniform motion the speed of a body is:", "options": ["Constantly changing", "Time-dependent", "Constant", "Only measured at the end"], "answer": 2, "explain": "In uniform motion the speed is constant.", "topic": "Uniform Motion"},
+    {"q": "The acceleration formula is:", "options": ["a = v/t", "a = Δv/Δt", "a = v·t", "a = s/t²"], "answer": 1, "explain": "Acceleration is the change in velocity divided by time.", "topic": "Uniform Acceleration"},
+    {"q": "The free-fall acceleration g is approximately:", "options": ["9.8 m/s²", "10 km/s²", "3 m/s²", "0 m/s²"], "answer": 0, "explain": "On Earth's surface g ≈ 9.8 m/s².", "topic": "Free Fall"},
+    {"q": "Newton's first law:", "options": ["F = ma", "A body keeps its state of rest or uniform motion unless acted upon by forces", "Action equals reaction", "P = mg"], "answer": 1, "explain": "Law of inertia: no force, no change of motion.", "topic": "Dynamics"},
+    {"q": "Newton's second law:", "options": ["F = ma", "F = m/a", "a = F·m", "F = mv"], "answer": 0, "explain": "Force equals mass times acceleration.", "topic": "Dynamics"},
+    {"q": "The work formula:", "options": ["A = F·s·cosα", "A = F/s", "A = m·v", "A = F·t"], "answer": 0, "explain": "Work is the scalar product of force and displacement.", "topic": "Work and Energy"},
+    {"q": "Kinetic energy:", "options": ["mv²/2", "mgh", "mv", "ma"], "answer": 0, "explain": "Kinetic energy Ek = mv²/2.", "topic": "Work and Energy"},
+    {"q": "Potential energy (at height):", "options": ["mv²/2", "mgh", "Fs", "Pt"], "answer": 1, "explain": "Potential energy Ep = mgh.", "topic": "Work and Energy"},
+    {"q": "The momentum conservation law applies:", "options": ["In inelastic collisions", "Only in closed systems", "Only in gravity", "When friction is present"], "answer": 1, "explain": "Momentum is conserved when no external forces act.", "topic": "Momentum"},
+    {"q": "Torque:", "options": ["M = F·d", "M = F/d", "M = m·a", "M = v·t"], "answer": 0, "explain": "Torque equals force times the lever arm.", "topic": "Statics"},
+    {"q": "The wavelength formula:", "options": ["λ = v/f", "λ = f/v", "λ = v·f", "λ = a·t"], "answer": 0, "explain": "Wavelength is speed divided by frequency.", "topic": "Oscillations and Waves"}
+  ]
+}

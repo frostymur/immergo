@@ -73,6 +73,7 @@ class LessonStartRequest(BaseModel):
     workspace_id: str
     prompt: str
     lang: str = Field(default="en", pattern="^(kz|ru|en)$")
+    level: str = Field(default="intermediate", pattern="^(beginner|intermediate|advanced)$")
 
 
 class LessonMessageRequest(BaseModel):
@@ -123,8 +124,14 @@ class RoadmapRequest(BaseModel):
     topic: str = Field(min_length=2, max_length=200)
     goal: str = Field(default="school", pattern="^(ent|olympiad|school)$")
     lang: str = Field(default="kz", pattern="^(kz|ru|en)$")
+    level: str = Field(default="intermediate", pattern="^(beginner|intermediate|advanced)$")
+    weak_topics: list[str] = []
 
 
 class RoadmapResponse(BaseModel):
     topic: str
-    steps: list[dict[str, str]]
+    goal: str
+    level: str
+    stages: list[dict[str, Any]]
+    total_weeks: int = 0
+    deadline: Optional[str] = None

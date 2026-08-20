@@ -1,4 +1,7 @@
+import asyncio
+import hashlib
 import json
+from pathlib import Path
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -317,6 +320,7 @@ async def stream_lesson_turn(
     student_message: str | None = None,
     topic: str | None = None,
     plan: list[dict[str, str]] | None = None,
+    level: str = "intermediate",
     model: str | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream one lesson turn from the LLM as parsed whiteboard blocks.
@@ -329,6 +333,14 @@ async def stream_lesson_turn(
     model = model or get_llm_model(lang)
     lang_name = LESSON_LANG_NAMES.get(lang, "English")
     system = LESSON_SYSTEM.replace("{lang_name}", lang_name)
+
+    level_note = {
+        "beginner": "The student is at a BEGINNER level: explain fundamentals first, use simple examples, go slower, and reinforce basics before advancing.",
+        "intermediate": "The student is at an INTERMEDIATE level: assume basic familiarity, focus on connections and common mistakes.",
+        "advanced": "The student is at an ADVANCED level: go deeper, cover edge cases, harder problems and exam-style reasoning.",
+    }.get(level, "")
+    if level_note:
+        system += f"\n\nADAPTIVE DIFFICULTY: {level_note}"
 
     if plan:
         current_step = max((b.get("step", -1) for b in history), default=-1)
@@ -483,27 +495,47 @@ async def generate_diagnostic_test(
     lang: str = "kz",
     model: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Generate a 5-question diagnostic mini-test (MCQ, one correct answer)."""
+    """Generate a diagnostic test of ~15 MCQs covering the main curriculum
+    topics. The result is cached on disk per (subject, grade, goal, lang) so
+    repeated calls are instant and we don't re-pay the slow LLM latency.
+
+    Generation: first enumerate the main topics, then write one question per
+    topic in small parallel batches (the model's output is capped, so large
+    single JSON responses get truncated mid-array).
+    """
     client = get_llm_client(lang)
     model = model or get_llm_model(lang)
     system = DIAGNOSTIC_SYSTEM.get(lang, DIAGNOSTIC_SYSTEM["en"])
     goal_name = GOAL_NAMES.get(goal, GOAL_NAMES["school"]).get(lang, "School program")
-    prompt = f"""{system}
 
-Create a diagnostic test for grade {grade} in the subject "{subject}" aiming at {goal_name}.
-Output ONLY valid JSON, no markdown fences: an array of exactly 5 objects:
-[{{"q": "question text", "options": ["A", "B", "C", "D"], "answer": 0, "explain": "one-line explanation of the correct option"}}]
-- "answer" is the 0-based index of the correct option.
-- Questions must be answerable from school knowledge alone, with varied difficulty.
-- Language: {lang.upper()}
+    # Disk cache key: one shared diagnostic per subject/grade/goal/lang.
+    key = hashlib.sha1(f"{subject}|{grade}|{goal}|{lang}".encode()).hexdigest()
+    cache_dir = Path(__file__).resolve().parent.parent / "data"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"diag_{key}.json"
+    if cache_file.exists():
+        try:
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+            if isinstance(cached, list) and cached:
+                return cached
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Call 1: main curriculum topics of the subject for this grade.
+    topics_prompt = f"""{system}
+
+List the MAIN TOPICS of the "{subject}" curriculum for grade {grade} (Kazakhstan schools).
+Output ONLY valid JSON, no markdown fences: an array of 12 to 15 topic names (strings), one per element.
+Each topic must be a distinct curriculum block. Language: {lang.upper()}
 """
     response = await client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system},
-            {"role": "user", "content": prompt},
+            {"role": "user", "content": topics_prompt},
         ],
-        temperature=0.7,
+        temperature=0.5,
+        max_tokens=2048,
     )
     raw = (response.choices[0].message.content or "[]").strip()
     if raw.startswith("```"):
@@ -511,27 +543,94 @@ Output ONLY valid JSON, no markdown fences: an array of exactly 5 objects:
         if raw.lower().startswith("json"):
             raw = raw[4:].strip()
     try:
-        questions = json.loads(raw)
+        topics = json.loads(raw)
     except json.JSONDecodeError:
-        return []
-    if not isinstance(questions, list):
-        return []
-    cleaned: list[dict[str, Any]] = []
-    for item in questions:
-        if not isinstance(item, dict) or not item.get("q") or not isinstance(item.get("options"), list):
-            continue
-        options = [str(o) for o in item["options"][:4]]
-        if len(options) < 2:
-            continue
-        cleaned.append(
-            {
-                "q": str(item["q"]),
-                "options": options,
-                "answer": int(item.get("answer", 0)) % len(options),
-                "explain": str(item.get("explain", "") or ""),
-            }
+        topics = []
+    if not isinstance(topics, list):
+        topics = []
+    topics = [str(t) for t in topics if str(t).strip()][:15]
+    if len(topics) < 6:
+        topics = [subject]
+
+    # Call 2: one question per topic, run in parallel small batches so the
+    # JSON never gets truncated mid-array by the model's output limit, and so
+    # total wall-time stays low.
+    BATCH = 5
+    batches = [topics[i : i + BATCH] for i in range(0, len(topics), BATCH)]
+
+    async def gen_batch(batch: list[str]) -> list[dict[str, Any]]:
+        if not batch:
+            return []
+        questions_prompt = f"""{system}
+
+Write a diagnostic test for grade {grade} in the subject "{subject}" (goal: {goal_name}).
+Cover EVERY topic below with exactly 1 question each ({len(batch)} questions total).
+Output ONLY valid JSON, no markdown fences, no extra text: an array of objects:
+[{{"q": "question text", "options": ["A", "B", "C", "D"], "answer": 0, "explain": "one-line explanation of the correct option", "topic": "the topic this question belongs to"}}]
+- "answer" is the 0-based index of the correct option.
+- Keep questions and options SHORT (a school student must read them fast).
+- Questions must be answerable from school knowledge alone; vary difficulty (easy, medium, hard).
+
+CURRICULUM TOPICS TO COVER:
+{chr(10).join(f"- {t}" for t in batch)}
+
+Language: {lang.upper()}
+"""
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": questions_prompt},
+            ],
+            temperature=0.7,
+            max_tokens=8192,
         )
-    return cleaned[:5]
+        raw = (response.choices[0].message.content or "[]").strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+        try:
+            questions = json.loads(raw)
+        except json.JSONDecodeError:
+            questions = []
+        return questions if isinstance(questions, list) else []
+
+    batch_results = await asyncio.gather(*[gen_batch(b) for b in batches])
+
+    cleaned: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for questions in batch_results:
+        for item in questions:
+            if not isinstance(item, dict) or not item.get("q") or not isinstance(item.get("options"), list):
+                continue
+            options = [str(o) for o in item["options"][:4]]
+            if len(options) < 2:
+                continue
+            q_text = str(item["q"])
+            if q_text in seen:
+                continue
+            seen.add(q_text)
+            cleaned.append(
+                {
+                    "q": q_text,
+                    "options": options,
+                    "answer": int(item.get("answer", 0)) % len(options),
+                    "explain": str(item.get("explain", "") or ""),
+                    "topic": str(item.get("topic", "") or ""),
+                }
+            )
+            if len(cleaned) >= 15:
+                break
+        if len(cleaned) >= 15:
+            break
+
+    if cleaned:
+        try:
+            cache_file.write_text(json.dumps(cleaned, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    return cleaned[:15]
 
 
 async def evaluate_diagnostic(
@@ -592,20 +691,43 @@ async def generate_roadmap(
     topic: str,
     goal: str = "school",
     lang: str = "kz",
+    level: str = "intermediate",
+    weak_topics: list[str] | None = None,
     model: str | None = None,
-) -> list[dict[str, str]]:
-    """Generate a goal-aware step-by-step study roadmap (4-6 steps)."""
+) -> dict[str, Any]:
+    """Generate a full goal-driven study roadmap.
+
+    Returns a dict with ``stages`` (6-10 weekly stages that build toward the
+    goal), ``total_weeks`` and a computed ``deadline``. Weak topics from a
+    diagnostic are scheduled first.
+    """
     client = get_llm_client(lang)
     model = model or get_llm_model(lang)
     lang_name = LESSON_LANG_NAMES.get(lang, "English")
     goal_name = GOAL_NAMES.get(goal, GOAL_NAMES["school"]).get(lang, "School program")
-    system = f"""You are a study roadmap planner for a Kazakhstani student.
-The student's goal: {goal_name}.
-Output ONLY a JSON array of 4 to 6 objects, one per step, in the exact shape:
-[{{"title": "Short heading (2-6 words)", "detail": "One line on what the student will learn or practice in this step", "duration": "estimate like '3 days' or '1 week'"}}]
-- Steps build on each other and cover the whole requested topic.
-- Write the plan ONLY in {lang_name}."""
-    user = f'The student wants to master: "{topic}"'
+    weak_part = ""
+    if weak_topics:
+        weak_part = "\nThe student scored weak on these topics — cover them FIRST, before anything else:\n- " + "\n- ".join(weak_topics[:6])
+    system = f"""You are a study roadmap planner for a Kazakhstani student in grade 7-12.
+The student's goal: {goal_name}. Student's current level: {level}.{weak_part}
+
+Build a COMPLETE preparation plan that really leads to the goal, not a generic list:
+- Output ONLY valid JSON, no markdown fences, in this exact shape:
+{{
+  "stages": [
+    {{
+      "title": "Stage heading (2-6 words)",
+      "topics": ["topic 1", "topic 2", "topic 3"],
+      "material": "What materials and theory to study this week (1-2 sentences)",
+      "check": "A concrete check for this week: a self-test / task / skill to demonstrate (1 sentence)",
+      "duration": "7 days"
+    }}
+  ]
+}}
+- 7 to 9 stages total (7-9 weeks). Stages build on each other: foundations first, then core theory, then practice, then exam-format work, and a FINAL stage that is a full mock check in the format of the goal (mock test / olympiad set / exam).
+- Every stage must list 3-5 concrete topics. "material" and "check" must be specific to the subject and goal, not generic advice.
+- Write everything ONLY in {lang_name}."""
+    user = f'The student wants to master: "{topic}" for {goal_name}.'
     response = await client.chat.completions.create(
         model=model,
         messages=[
@@ -614,25 +736,32 @@ Output ONLY a JSON array of 4 to 6 objects, one per step, in the exact shape:
         ],
         temperature=0.5,
     )
-    raw = (response.choices[0].message.content or "").strip()
+    raw = (response.choices[0].message.content or "{}").strip()
     if raw.startswith("```"):
         raw = raw.strip("`")
         if raw.lower().startswith("json"):
             raw = raw[4:].strip()
     try:
-        steps_raw = json.loads(raw)
+        data = json.loads(raw)
     except json.JSONDecodeError:
-        return []
-    if not isinstance(steps_raw, list):
-        return []
-    steps: list[dict[str, str]] = []
-    for item in steps_raw:
-        if isinstance(item, dict) and item.get("title"):
-            steps.append(
-                {
-                    "title": str(item["title"]),
-                    "detail": str(item.get("detail", "") or ""),
-                    "duration": str(item.get("duration", "") or ""),
-                }
-            )
-    return steps[:6]
+        data = {}
+    stages_raw = data.get("stages") if isinstance(data, dict) else None
+    if not isinstance(stages_raw, list):
+        return {"stages": [], "total_weeks": 0, "deadline": None}
+    stages: list[dict[str, Any]] = []
+    for item in stages_raw[:9]:
+        if not isinstance(item, dict) or not item.get("title"):
+            continue
+        stages.append(
+            {
+                "title": str(item["title"]),
+                "topics": [str(t) for t in item.get("topics", []) if str(t).strip()][:5],
+                "material": str(item.get("material", "") or ""),
+                "check": str(item.get("check", "") or ""),
+                "duration": str(item.get("duration", "7 days") or "7 days"),
+            }
+        )
+    if not stages:
+        return {"stages": [], "total_weeks": 0, "deadline": None}
+    total_weeks = len(stages)
+    return {"stages": stages, "total_weeks": total_weeks, "deadline": None}

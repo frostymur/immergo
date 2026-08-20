@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Loader2, Target, BarChart3, GraduationCap, Award } from "lucide-react";
 import { useLocale, type Locale } from "@/components/LocaleProvider";
+import { createClient } from "@/lib/supabase/client";
 import { apiDiagnosticEvaluate, apiDiagnosticStart, type DiagnosticQuestion, type DiagnosticResult, type Goal } from "@/lib/api";
 
 type Dict = {
@@ -35,7 +36,7 @@ const I18N: Record<Locale, Dict> = {
   kz: {
     tag: "DIAGNOSTIC",
     title: "Жылдам диагностика",
-    subtitle: "Сынып пен пәнді таңдап, 5 сұраққа жауап беріңіз. Біз дайындық жоспарыңызды құрамыз.",
+    subtitle: "Сынып пен пәнді таңдап, 15 сұраққа жауап беріңіз — барлық негізгі тақырыптар бойынша терең диагностика. Біз дайындық жоспарыңызды құрамыз.",
     classLabel: "Сынып",
     subjectLabel: "Пән",
     goalLabel: "Мақсат",
@@ -63,7 +64,7 @@ const I18N: Record<Locale, Dict> = {
   ru: {
     tag: "DIAGNOSTIC",
     title: "Быстрая диагностика",
-    subtitle: "Выберите класс и предмет, ответьте на 5 вопросов. Мы составим ваш план подготовки.",
+    subtitle: "Выберите класс и предмет, ответьте на 15 вопросов — глубокая диагностика по всем основным темам. Мы составим ваш план подготовки.",
     classLabel: "Класс",
     subjectLabel: "Предмет",
     goalLabel: "Цель",
@@ -91,7 +92,7 @@ const I18N: Record<Locale, Dict> = {
   en: {
     tag: "DIAGNOSTIC",
     title: "Quick Diagnostic",
-    subtitle: "Pick your grade and subject, answer 5 questions. We will build your study plan.",
+    subtitle: "Pick your grade and subject, answer 15 questions — a deep diagnostic across all key topics. We will build your study plan.",
     classLabel: "Grade",
     subjectLabel: "Subject",
     goalLabel: "Goal",
@@ -170,26 +171,43 @@ export default function DiagnosticPage() {
   const finishTest = async () => {
     setLoading(true);
     setError("");
+    let final: DiagnosticResult;
     try {
-      const data = await apiDiagnosticEvaluate(grade, subject, goal, locale, questions, answers);
-      setResult(data);
+      final = await apiDiagnosticEvaluate(grade, subject, goal, locale, questions, answers);
     } catch {
       const correct = questions.reduce((acc, q, i) => (answers[i] === q.answer ? acc + 1 : acc), 0);
-      setResult({
+      const pct = correct / Math.max(1, questions.length);
+      final = {
         correct,
         total: questions.length,
-        level: correct >= 4 ? "advanced" : correct >= 2 ? "intermediate" : "beginner",
-        feedback:
-          "Evaluation failed — showing score only.",
+        level: pct >= 0.75 ? "advanced" : pct >= 0.45 ? "intermediate" : "beginner",
+        feedback: "",
         weak_topics: questions
-          .map((q, i) => (answers[i] === q.answer ? "" : q.q))
+          .map((q, i) => (answers[i] === q.answer ? "" : q.topic || q.q))
           .filter(Boolean)
-          .slice(0, 4),
+          .slice(0, 6),
         recommendation: `${subject}: ${locale === "kz" ? "тақырыптың негіздерінен бастаңыз" : locale === "ru" ? "начните с основ темы" : "start with the fundamentals of the topic"}.`,
+      };
+    }
+    setResult(final);
+    setLoading(false);
+    setStep("result");
+
+    const supabase = createClient();
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user) {
+      await supabase.from("diagnostic_results").insert({
+        user_id: userData.user.id,
+        subject,
+        grade,
+        goal,
+        correct: final.correct,
+        total: final.total,
+        level: final.level,
+        feedback: final.feedback,
+        weak_topics: final.weak_topics,
+        recommendation: final.recommendation,
       });
-    } finally {
-      setLoading(false);
-      setStep("result");
     }
   };
 
@@ -402,13 +420,18 @@ export default function DiagnosticPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
-                onClick={() => router.push(`/roadmap?topic=${encodeURIComponent(subject)}&goal=${goal}`)}
+                onClick={() => {
+                  const weak = result.weak_topics.join(",");
+                  router.push(
+                    `/roadmap?topic=${encodeURIComponent(subject)}&goal=${goal}&level=${result.level}&weak=${encodeURIComponent(weak)}`
+                  );
+                }}
                 className="flex items-center justify-center gap-2 px-5 py-3 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-all"
               >
                 <Target size={15} /> {t.roadmap}
               </button>
               <button
-                onClick={() => router.push(`/workspace?topic=${encodeURIComponent(`${subject} — ${goal}`)}`)}
+                onClick={() => router.push(`/workspace?topic=${encodeURIComponent(`${subject} — ${goal}`)}&level=${result.level}`)}
                 className="flex items-center justify-center gap-2 px-5 py-3 border border-primary text-primary hover:bg-primary/10 text-sm font-medium transition-all"
               >
                 <ArrowRight size={15} /> {t.lesson}

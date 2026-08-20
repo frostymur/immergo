@@ -69,6 +69,7 @@ export type DiagnosticQuestion = {
   options: string[];
   answer: number;
   explain?: string;
+  topic?: string;
 };
 
 export type DiagnosticResult = {
@@ -105,12 +106,35 @@ export async function apiDiagnosticEvaluate(
   }) as Promise<DiagnosticResult>;
 }
 
-export async function apiRoadmap(topic: string, goal: Goal, lang: string) {
+export type RoadmapStage = {
+  title: string;
+  topics: string[];
+  material: string;
+  check: string;
+  duration: string;
+};
+
+export type RoadmapData = {
+  topic: string;
+  goal: Goal;
+  level: "beginner" | "intermediate" | "advanced";
+  stages: RoadmapStage[];
+  total_weeks: number;
+  deadline: string | null;
+};
+
+export async function apiRoadmap(
+  topic: string,
+  goal: Goal,
+  lang: string,
+  level: string = "intermediate",
+  weakTopics: string[] = []
+) {
   return apiFetch("/api/ai/roadmap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, goal, lang }),
-  }) as Promise<{ topic: string; steps: { title: string; detail: string; duration?: string }[] }>;
+    body: JSON.stringify({ topic, goal, lang, level, weak_topics: weakTopics }),
+  }) as Promise<RoadmapData>;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,13 +234,14 @@ export async function streamLessonStart(
   prompt: string,
   lang: string,
   handlers: LessonStreamHandlers,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  level: string = "intermediate"
 ) {
   try {
     const res = await fetch(`${API_BASE}/api/ai/lesson/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace_id: workspaceId, prompt, lang }),
+      body: JSON.stringify({ workspace_id: workspaceId, prompt, lang, level }),
       signal,
     });
     await consumeSseStream(res, handlers);

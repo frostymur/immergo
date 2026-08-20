@@ -41,3 +41,5 @@ Thumbs.db
 *.njsproj
 *.sln
 *.swp
+backend/app/data/
+check_sessions.js
