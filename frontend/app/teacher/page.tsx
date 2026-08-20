@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchHeatmap, uploadPdf } from "@/lib/api";
 import UserAvatar from "@/components/UserAvatar";
 import { useUserRole } from "@/lib/useUserRole";
-import { Upload, FileText, Loader2, Plus, Link2, X, Check } from "lucide-react";
+import { Upload, FileText, Loader2, Plus, Link2, X, Check, ClipboardList, CalendarDays } from "lucide-react";
 
 type Workspace = { id: string; title: string; subject: string; grade: string };
 type HeatmapNode = {
@@ -23,6 +23,15 @@ type MemberRow = {
   completed: number;
   failed: number;
   errors: number;
+};
+type AssignmentRow = {
+  id: string;
+  title: string;
+  topic: string;
+  deadline: string | null;
+  created_at: string;
+  done_count: number;
+  total_count: number;
 };
 
 export default function TeacherPage() {
@@ -42,6 +51,11 @@ export default function TeacherPage() {
   const [newClass, setNewClass] = useState({ title: "", subject: "", grade: "" });
   const [creating, setCreating] = useState(false);
 
+  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
+  const [showAssign, setShowAssign] = useState(false);
+  const [newAssign, setNewAssign] = useState({ title: "", topic: "", description: "", deadline: "" });
+  const [assigning, setAssigning] = useState(false);
+
   const [copied, setCopied] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -52,14 +66,6 @@ export default function TeacherPage() {
       router.replace("/");
     }
   }, [role, roleLoading, router]);
-
-  if (roleLoading || role !== "teacher") {
-    return (
-      <div className="flex-1 flex items-center justify-center min-h-screen">
-        <Loader2 size={20} className="animate-spin text-muted" />
-      </div>
-    );
-  }
 
   const loadWorkspaces = async () => {
     const { data } = await supabase
@@ -90,6 +96,8 @@ export default function TeacherPage() {
       .select("id, file_name")
       .eq("workspace_id", selectedWs)
       .then(({ data }) => setSources(data || []));
+
+    loadAssignments(selectedWs);
 
     (async () => {
       const { data: memberships } = await supabase
@@ -149,7 +157,7 @@ export default function TeacherPage() {
   };
 
   const shareUrl = typeof window !== "undefined" && selectedWs
-    ? `${window.location.origin}/workspace?workspace_id=${selectedWs}`
+    ? `${window.location.origin}/invite?class=${selectedWs}`
     : "";
 
   const copyLink = async () => {
@@ -161,6 +169,69 @@ export default function TeacherPage() {
     } catch {
       setError("Could not copy link");
     }
+  };
+
+  const loadAssignments = async (workspaceId: string) => {
+    const { data: userId } = await supabase.auth.getUser();
+    if (!userId.user) return;
+    const { data: rows } = await supabase
+      .from("assignments")
+      .select("id, title, topic, deadline, created_at")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false });
+    const { data: memberships } = await supabase
+      .from("class_memberships")
+      .select("student_id")
+      .eq("workspace_id", workspaceId);
+    const total = new Set((memberships || []).map((m) => m.student_id)).size;
+    const { data: prog } = rows?.length
+      ? await supabase
+          .from("assignment_progress")
+          .select("assignment_id, status")
+          .in("assignment_id", rows.map((r) => r.id))
+          .eq("status", "done")
+      : { data: [] };
+    const doneByAssign = new Map<string, number>();
+    for (const p of prog || []) {
+      doneByAssign.set(p.assignment_id, (doneByAssign.get(p.assignment_id) || 0) + 1);
+    }
+    setAssignments(
+      (rows || []).map((r) => ({
+        ...r,
+        done_count: doneByAssign.get(r.id) || 0,
+        total_count: total,
+      }))
+    );
+  };
+
+  const handleAssign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedWs || !newAssign.title || !newAssign.topic) return;
+    setAssigning(true);
+    setError("");
+    const { data: u } = await supabase.auth.getUser();
+    const teacherId = u.user?.id;
+    if (!teacherId) {
+      setError("Not authenticated");
+      setAssigning(false);
+      return;
+    }
+    const { error: err } = await supabase.from("assignments").insert({
+      workspace_id: selectedWs,
+      teacher_id: teacherId,
+      title: newAssign.title,
+      topic: newAssign.topic,
+      description: newAssign.description || null,
+      deadline: newAssign.deadline ? new Date(newAssign.deadline).toISOString() : null,
+    });
+    if (err) {
+      setError(err.message || "Failed to create assignment");
+    } else {
+      setShowAssign(false);
+      setNewAssign({ title: "", topic: "", description: "", deadline: "" });
+      loadAssignments(selectedWs);
+    }
+    setAssigning(false);
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,6 +259,14 @@ export default function TeacherPage() {
   const totalAttempts = members.reduce((a, s) => a + s.completed + s.failed, 0);
   const totalCompleted = members.reduce((a, s) => a + s.completed, 0);
   const successRate = totalAttempts > 0 ? Math.round((totalCompleted / totalAttempts) * 100) : null;
+
+  if (roleLoading || role !== "teacher") {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-screen">
+        <Loader2 size={20} className="animate-spin text-muted" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -263,11 +342,20 @@ export default function TeacherPage() {
             <div className="md:col-span-2 border border-border bg-surface">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ UPLOAD_MATERIAL ]</span>
-                {sources.length > 0 && (
-                  <span className="font-mono text-[10px] uppercase text-muted">
-                    {sources.length} FILE{sources.length > 1 ? "S" : ""}
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAssign(true)}
+                    disabled={!selectedWs}
+                    className="flex items-center gap-1.5 border border-primary/40 bg-primary/10 text-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-40"
+                  >
+                    <ClipboardList size={12} /> {t("teacher.assign")}
+                  </button>
+                  {sources.length > 0 && (
+                    <span className="font-mono text-[10px] uppercase text-muted">
+                      {sources.length} FILE{sources.length > 1 ? "S" : ""}
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="p-4 space-y-4">
                 <button
@@ -286,18 +374,19 @@ export default function TeacherPage() {
                 <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleUpload} />
 
                 {selectedWs && (
-                  <div className="border border-border bg-surface p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ SHARE_LINK ]</div>
-                      <div className="text-xs text-muted truncate">{shareUrl}</div>
+                  <div className="border border-border bg-surface p-3 space-y-1.5">
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ INVITE_STUDENTS ]</div>
+                    <div className="text-xs text-muted truncate">{shareUrl}</div>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[11px] text-muted">{t("teacher.inviteLabel")}</p>
+                      <button
+                        onClick={copyLink}
+                        className="flex items-center gap-1.5 border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:border-primary transition-colors flex-shrink-0"
+                      >
+                        {copied ? <Check size={12} /> : <Link2 size={12} />}
+                        {copied ? t("teacher.copied") : t("teacher.copy")}
+                      </button>
                     </div>
-                    <button
-                      onClick={copyLink}
-                      className="flex items-center gap-1.5 border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:border-primary transition-colors flex-shrink-0"
-                    >
-                      {copied ? <Check size={12} /> : <Link2 size={12} />}
-                      {copied ? t("teacher.copied") : t("teacher.copy")}
-                    </button>
                   </div>
                 )}
 
@@ -344,6 +433,38 @@ export default function TeacherPage() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </div>
+
+          {/* Assignments */}
+          <div className="border border-border bg-surface overflow-hidden">
+            <div className="px-4 py-3 border-b border-border font-mono text-[10px] uppercase tracking-widest text-muted">
+              [ {t("teacher.assignList")} ]
+            </div>
+            {assignments.length === 0 ? (
+              <div className="p-4 text-sm text-muted">{t("teacher.noAssignments")}</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {assignments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{a.title}</div>
+                      <div className="text-xs text-muted truncate">topic: {a.topic}</div>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {a.deadline && (
+                        <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-muted">
+                          <CalendarDays size={11} />
+                          {new Date(a.deadline).toLocaleDateString()}
+                        </span>
+                      )}
+                      <span className="font-mono text-[10px] uppercase border border-border px-2 py-0.5 text-muted">
+                        {a.done_count}/{a.total_count} {t("teacher.doneOf")}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
@@ -423,6 +544,65 @@ export default function TeacherPage() {
                 className="w-full h-10 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground text-sm font-medium transition-colors"
               >
                 {creating ? t("teacher.creating") : t("teacher.createClass")}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    {/* Assign homework modal */}
+      {showAssign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-surface border border-border w-full max-w-md">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.assignNew")} ]</span>
+              <button onClick={() => setShowAssign(false)} className="text-muted hover:text-foreground">
+                <X size={14} />
+              </button>
+            </div>
+            <form onSubmit={handleAssign} className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">{t("teacher.assignTitle")}</label>
+                <input
+                  value={newAssign.title}
+                  onChange={(e) => setNewAssign({ ...newAssign, title: e.target.value })}
+                  className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
+                  placeholder={t("teacher.assignTitlePh")}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">{t("teacher.assignTopic")}</label>
+                <input
+                  value={newAssign.topic}
+                  onChange={(e) => setNewAssign({ ...newAssign, topic: e.target.value })}
+                  className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
+                  placeholder={t("teacher.assignTopicPh")}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">{t("teacher.assignDesc")}</label>
+                <input
+                  value={newAssign.description}
+                  onChange={(e) => setNewAssign({ ...newAssign, description: e.target.value })}
+                  className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1">{t("teacher.assignDeadline")}</label>
+                <input
+                  type="date"
+                  value={newAssign.deadline}
+                  onChange={(e) => setNewAssign({ ...newAssign, deadline: e.target.value })}
+                  className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={assigning}
+                className="w-full h-10 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground text-sm font-medium transition-colors"
+              >
+                {assigning ? t("teacher.assigning") : t("teacher.assignSubmit")}
               </button>
             </form>
           </div>

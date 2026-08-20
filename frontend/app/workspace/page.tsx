@@ -65,6 +65,7 @@ function WorkspaceInner() {
   const topic = searchParams.get("topic") || "";
   const workspaceIdParam = searchParams.get("workspace_id");
   const lessonParam = searchParams.get("lesson");
+  const assignmentParam = searchParams.get("assignment");
   const lessonLevel = (searchParams.get("level") || "intermediate") as "beginner" | "intermediate" | "advanced";
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -118,6 +119,7 @@ function WorkspaceInner() {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const assignmentRef = useRef<string | null>(null);
   const speakQueue = useRef<SpeakJob[]>([]);
   const audioCache = useRef<Map<number, string>>(new Map());
   const playingRef = useRef(false);
@@ -293,6 +295,19 @@ function WorkspaceInner() {
       } else if (event.kind === "done") {
         setStreaming(false);
         setStatus("live");
+        if (assignmentRef.current) {
+          const id = assignmentRef.current;
+          assignmentRef.current = null;
+          supabase.auth.getUser().then(({ data }) => {
+            if (!data.user) return;
+            supabase
+              .from("assignment_progress")
+              .upsert(
+                { assignment_id: id, student_id: data.user!.id, status: "done", done_at: new Date().toISOString() },
+                { onConflict: "assignment_id,student_id" }
+              );
+          });
+        }
       } else if (event.kind === "error") {
         setStreaming(false);
         setStatus("reconnecting");
@@ -469,6 +484,27 @@ function WorkspaceInner() {
       setWorkspaceId(wsId);
       setLessonTitle(wsTitle);
 
+      // Teacher assignment: use its topic as the lesson prompt, mark started
+      let startPrompt = topic;
+      if (assignmentParam && wsId) {
+        const { data: asg } = await supabase
+          .from("assignments")
+          .select("title, topic")
+          .eq("id", assignmentParam)
+          .maybeSingle();
+        if (asg) {
+          startPrompt = asg.topic;
+          setLessonTitle(asg.title);
+          assignmentRef.current = assignmentParam;
+          await supabase
+            .from("assignment_progress")
+            .upsert(
+              { assignment_id: assignmentParam, student_id: userId, status: "started" },
+              { onConflict: "assignment_id,student_id" }
+            );
+        }
+      }
+
       // Upload a PDF attached on the home screen, if any
       const pending = takePendingMaterial();
       if (pending && wsId) {
@@ -481,7 +517,7 @@ function WorkspaceInner() {
       }
 
       // Start the lesson from the topic prompt
-      if (topic) startLesson(wsId!, topic);
+      if (startPrompt) startLesson(wsId!, startPrompt);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Award, BookOpen, CheckCircle2, Flame, Target, TrendingUp, XCircle, ArrowRight, Zap } from "lucide-react";
+import { Award, BellRing, BookOpen, CheckCircle2, Flame, Target, TrendingUp, XCircle, ArrowRight, Zap } from "lucide-react";
 import { useLocale, type Locale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
 
@@ -39,6 +39,11 @@ const I18N: Record<Locale, Record<string, string>> = {
     totalXp: "жалпы тәжірибе",
     last: "Соңғы әрекет",
     streakLabel: "Күн қатарынан",
+    newAssignment: "Жаңа тапсырма",
+    fromTeacher: "мұғалімнен",
+    start: "Бастау",
+    entCountdown: "ЕНТ-ге дейін",
+    daysLeftShort: "күн",
   },
   ru: {
     title: "Мой кабинет",
@@ -71,6 +76,11 @@ const I18N: Record<Locale, Record<string, string>> = {
     totalXp: "всего опыта",
     last: "Последняя попытка",
     streakLabel: "Дней подряд",
+    newAssignment: "Новое задание",
+    fromTeacher: "от учителя",
+    start: "Начать",
+    entCountdown: "До ЕНТ осталось",
+    daysLeftShort: "дней",
   },
   en: {
     title: "My Cabinet",
@@ -103,12 +113,18 @@ const I18N: Record<Locale, Record<string, string>> = {
     totalXp: "total XP",
     last: "Last attempt",
     streakLabel: "Day streak",
+    newAssignment: "New assignment",
+    fromTeacher: "from your teacher",
+    start: "Start",
+    entCountdown: "Days until UNT",
+    daysLeftShort: "days",
   },
 };
 
 type WeakNode = { node_id: string; errors: number; attempts: number };
 type PlanRow = { id: string; topic: string; goal: string; total_weeks: number; deadline: string | null; stages: unknown[] };
 type DoneRow = { plan_id: string; count: number };
+type AssignmentRow = { id: string; workspace_id: string; title: string; topic: string; deadline: string | null };
 
 function ActivityCalendar({
   activeDates,
@@ -234,6 +250,7 @@ export default function DashboardPage() {
   const [lastDiagnostic, setLastDiagnostic] = useState<{ subject: string; goal: string; correct: number; total: number } | null>(null);
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [planDoneCount, setPlanDoneCount] = useState(0);
+  const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
 
   const [activeDates, setActiveDates] = useState<Map<string, number>>(new Map());
   const [streak, setStreak] = useState({ current: 0, max: 0, total: 0 });
@@ -351,6 +368,35 @@ export default function DashboardPage() {
         planDone: 0,
         planStagesTotal: plans?.[0]?.stages?.length || 0,
       });
+
+      // Teacher assignments for classes the student is in
+      const { data: memberships } = await supabase
+        .from("class_memberships")
+        .select("workspace_id")
+        .eq("student_id", userId);
+      const wsIds = (memberships || []).map((m) => m.workspace_id);
+      if (wsIds.length > 0) {
+        const { data: asg } = await supabase
+          .from("assignments")
+          .select("id, workspace_id, title, topic, deadline")
+          .in("workspace_id", wsIds)
+          .order("created_at", { ascending: false });
+        const rows = asg || [];
+        const { data: myProg } = rows.length
+          ? await supabase
+              .from("assignment_progress")
+              .select("assignment_id, status")
+              .eq("student_id", userId)
+              .in("assignment_id", rows.map((a) => a.id))
+          : { data: [] };
+        const statusByAssign = new Map((myProg || []).map((p) => [p.assignment_id, p.status]));
+        const active = rows.filter(
+          (a) =>
+            (statusByAssign.get(a.id) || "assigned") !== "done" &&
+            (!a.deadline || new Date(a.deadline).getTime() > Date.now())
+        );
+        setAssignments(active.slice(0, 2));
+      }
       setLoading(false);
     })();
   }, [router, supabase]);
@@ -391,6 +437,59 @@ export default function DashboardPage() {
         <p className="text-sm text-muted">{t.lessons}…</p>
       ) : (
         <div className="space-y-6">
+          {/* Teacher assignments */}
+          {assignments.length > 0 && (
+            <div className="border-2 border-orange-400 bg-orange-50 p-5 space-y-3">
+              {assignments.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center gap-4">
+                  <div className="w-11 h-11 bg-orange-500 flex items-center justify-center flex-shrink-0">
+                    <BellRing size={20} className="text-white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[10px] uppercase tracking-widest text-orange-700">
+                      [ {t.newAssignment} {t.fromTeacher} ]
+                    </div>
+                    <div className="text-sm font-semibold text-foreground">{a.title}</div>
+                    <div className="text-xs text-muted">
+                      {a.topic}
+                      {a.deadline && (
+                        <span className="text-orange-700 font-medium">
+                          {" · "}
+                          {t.deadline}: {new Date(a.deadline).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Link
+                    href={`/workspace?workspace_id=${a.workspace_id}&assignment=${a.id}`}
+                    className="h-10 px-5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold flex items-center gap-2 transition-colors flex-shrink-0"
+                  >
+                    {t.start} <ArrowRight size={14} />
+                  </Link>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Goal countdown widget */}
+          {plan && plan.goal === "ent" && daysLeft !== null && (
+            <div className="bg-surface border border-primary/40 p-5 flex flex-wrap items-center gap-4">
+              <div className="w-12 h-12 bg-primary/10 border border-primary/30 flex items-center justify-center">
+                <Target size={22} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted">{t.entCountdown}</div>
+                <div className="text-sm font-semibold text-foreground">
+                  {plan.topic}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-primary">{daysLeft}</div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted">{t.daysLeftShort}</div>
+              </div>
+            </div>
+          )}
+
           {/* XP and Streak card */}
           <div className="bg-surface border border-border p-5 flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-4">
