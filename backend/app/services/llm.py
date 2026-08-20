@@ -461,3 +461,178 @@ Material:
         temperature=0.4,
     )
     return (response.choices[0].message.content or "").strip()
+
+
+DIAGNOSTIC_SYSTEM = {
+    "kz": "Сен қазақстандық оқушыға арналған диагностикалық тест құрастырушысың. Барлық сұрақтарды қазақ тілінде жаз.",
+    "ru": "Ты — составитель диагностического теста для казахстанского школьника. Все вопросы пиши на русском.",
+    "en": "You are a diagnostic test writer for a Kazakhstani school student. Write all questions in English.",
+}
+
+GOAL_NAMES = {
+    "ent": {"kz": "ЕНТ", "ru": "ЕНТ", "en": "UNT"},
+    "olympiad": {"kz": "Олимпиада", "ru": "Олимпиада", "en": "Olympiad"},
+    "school": {"kz": "Мектеп бағдарламасы", "ru": "Школьная программа", "en": "School program"},
+}
+
+
+async def generate_diagnostic_test(
+    subject: str,
+    grade: int,
+    goal: str = "school",
+    lang: str = "kz",
+    model: str | None = None,
+) -> list[dict[str, Any]]:
+    """Generate a 5-question diagnostic mini-test (MCQ, one correct answer)."""
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
+    system = DIAGNOSTIC_SYSTEM.get(lang, DIAGNOSTIC_SYSTEM["en"])
+    goal_name = GOAL_NAMES.get(goal, GOAL_NAMES["school"]).get(lang, "School program")
+    prompt = f"""{system}
+
+Create a diagnostic test for grade {grade} in the subject "{subject}" aiming at {goal_name}.
+Output ONLY valid JSON, no markdown fences: an array of exactly 5 objects:
+[{{"q": "question text", "options": ["A", "B", "C", "D"], "answer": 0, "explain": "one-line explanation of the correct option"}}]
+- "answer" is the 0-based index of the correct option.
+- Questions must be answerable from school knowledge alone, with varied difficulty.
+- Language: {lang.upper()}
+"""
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.7,
+    )
+    raw = (response.choices[0].message.content or "[]").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        questions = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(questions, list):
+        return []
+    cleaned: list[dict[str, Any]] = []
+    for item in questions:
+        if not isinstance(item, dict) or not item.get("q") or not isinstance(item.get("options"), list):
+            continue
+        options = [str(o) for o in item["options"][:4]]
+        if len(options) < 2:
+            continue
+        cleaned.append(
+            {
+                "q": str(item["q"]),
+                "options": options,
+                "answer": int(item.get("answer", 0)) % len(options),
+                "explain": str(item.get("explain", "") or ""),
+            }
+        )
+    return cleaned[:5]
+
+
+async def evaluate_diagnostic(
+    subject: str,
+    grade: int,
+    goal: str,
+    lang: str,
+    correct: int,
+    total: int,
+    weak_topics_hint: str,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Produce a level, feedback and personal recommendation from test results."""
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
+    system = LLM_SYSTEM.get(lang, LLM_SYSTEM["en"])
+    goal_name = GOAL_NAMES.get(goal, GOAL_NAMES["school"]).get(lang, "School program")
+    score_pct = int(correct / total * 100) if total else 0
+    prompt = f"""{system}
+
+A grade {grade} student got {correct}/{total} ({score_pct}%) on a diagnostic test in "{subject}" (goal: {goal_name}).
+The student's wrong questions were about: {weak_topics_hint or "general knowledge"}.
+Output ONLY valid JSON, no markdown fences:
+{{
+  "level": "beginner|intermediate|advanced",
+  "feedback": "2-3 encouraging sentences for the student",
+  "weak_topics": ["topic 1", "topic 2"],
+  "recommendation": "one concrete next-step sentence (what to study first)"
+}}
+Language: {lang.upper()}
+"""
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.5,
+    )
+    raw = (response.choices[0].message.content or "{}").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        result = {}
+    return {
+        "level": result.get("level") if result.get("level") in ("beginner", "intermediate", "advanced") else "intermediate",
+        "feedback": str(result.get("feedback", "") or ""),
+        "weak_topics": [str(t) for t in result.get("weak_topics", [])][:5] if isinstance(result.get("weak_topics"), list) else [],
+        "recommendation": str(result.get("recommendation", "") or ""),
+    }
+
+
+async def generate_roadmap(
+    topic: str,
+    goal: str = "school",
+    lang: str = "kz",
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    """Generate a goal-aware step-by-step study roadmap (4-6 steps)."""
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
+    lang_name = LESSON_LANG_NAMES.get(lang, "English")
+    goal_name = GOAL_NAMES.get(goal, GOAL_NAMES["school"]).get(lang, "School program")
+    system = f"""You are a study roadmap planner for a Kazakhstani student.
+The student's goal: {goal_name}.
+Output ONLY a JSON array of 4 to 6 objects, one per step, in the exact shape:
+[{{"title": "Short heading (2-6 words)", "detail": "One line on what the student will learn or practice in this step", "duration": "estimate like '3 days' or '1 week'"}}]
+- Steps build on each other and cover the whole requested topic.
+- Write the plan ONLY in {lang_name}."""
+    user = f'The student wants to master: "{topic}"'
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.5,
+    )
+    raw = (response.choices[0].message.content or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    try:
+        steps_raw = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(steps_raw, list):
+        return []
+    steps: list[dict[str, str]] = []
+    for item in steps_raw:
+        if isinstance(item, dict) and item.get("title"):
+            steps.append(
+                {
+                    "title": str(item["title"]),
+                    "detail": str(item.get("detail", "") or ""),
+                    "duration": str(item.get("duration", "") or ""),
+                }
+            )
+    return steps[:6]

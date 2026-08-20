@@ -6,7 +6,9 @@ import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
 import {
   fetchLesson,
+  fetchSummary,
   fetchTtsAudio,
+  generatePodcast,
   streamLessonMessage,
   streamLessonStart,
   uploadPdf,
@@ -16,9 +18,11 @@ import {
 } from "@/lib/api";
 import { takePendingMaterial } from "@/lib/pendingMaterial";
 import {
+  BookOpen,
   FileText,
   Loader2,
   MessageSquare,
+  Mic,
   Minus,
   Pause,
   Play,
@@ -33,15 +37,29 @@ import {
 
 type Source = { id: string; file_name: string; file_hash: string };
 type ConnStatus = "idle" | "connecting" | "live" | "reconnecting";
+type MaterialTab = "files" | "summary" | "podcast";
 
 type SpeakJob = { key: number; text: string };
+
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((e: SpeechRecognitionLikeEvent) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+};
+
+type SpeechRecognitionLikeEvent = {
+  results?: { [index: number]: { [index: number]: { transcript?: string } } };
+};
 
 function errorMessage(err: unknown, fallback: string) {
   return err instanceof Error ? err.message : fallback;
 }
 
 function WorkspaceInner() {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
   const topic = searchParams.get("topic") || "";
@@ -63,6 +81,13 @@ function WorkspaceInner() {
 
   // Panels
   const [materialOpen, setMaterialOpen] = useState(false);
+  const [materialTab, setMaterialTab] = useState<MaterialTab>("files");
+  const [activePdfUrl, setActivePdfUrl] = useState<string | null>(null);
+  const [summaryBySource, setSummaryBySource] = useState<Record<string, string>>({});
+  const [summaryLoading, setSummaryLoading] = useState<string | null>(null);
+  const [podcastBySource, setPodcastBySource] = useState<Record<string, string>>({});
+  const [podcastLoading, setPodcastLoading] = useState<string | null>(null);
+  const [micListening, setMicListening] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [sources, setSources] = useState<Source[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -282,7 +307,7 @@ function WorkspaceInner() {
     setError(
       err instanceof Error && err.message
         ? err.message
-        : "Connection lost — rejoin to pick up where you left off."
+        : t("ws.reconnecting")
     );
   }, []);
 
@@ -394,7 +419,7 @@ function WorkspaceInner() {
         } catch {
           setStatus("reconnecting");
           setSessionId(lessonParam);
-          setError("Connection lost — rejoin to pick up where you left off.");
+          setError(t("ws.reconnecting"));
         }
         return;
       }
@@ -623,6 +648,68 @@ function WorkspaceInner() {
       setError(errorMessage(err, "Upload failed"));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleOpenPdf = (sourceId: string) => {
+    setActivePdfUrl(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/ai/source/${sourceId}/file`);
+  };
+
+  const handleGenerateSummary = async (sourceId: string) => {
+    if (!workspaceId) return;
+    setSummaryLoading(sourceId);
+    try {
+      const res = await fetchSummary(workspaceId, sourceId, locale);
+      setSummaryBySource((prev) => ({ ...prev, [sourceId]: res.summary }));
+    } catch {
+      setSummaryBySource((prev) => ({ ...prev, [sourceId]: "(summary unavailable — check backend connection)" }));
+    } finally {
+      setSummaryLoading(null);
+    }
+  };
+
+  const handleGeneratePodcast = async (sourceId: string) => {
+    if (!workspaceId) return;
+    setPodcastLoading(sourceId);
+    try {
+      const res = await generatePodcast(workspaceId, sourceId, locale);
+      setPodcastBySource((prev) => ({ ...prev, [sourceId]: res.audio_url }));
+    } catch {
+      setPodcastBySource((prev) => ({ ...prev, [sourceId]: "" }));
+    } finally {
+      setPodcastLoading(null);
+    }
+  };
+
+  const toggleMic = () => {
+    const w = window as unknown as {
+      SpeechRecognition?: new () => SpeechRecognitionLike;
+      webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    };
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) {
+      setError("Voice input works in Chrome/Edge browsers only.");
+      return;
+    }
+    if (micListening) {
+      setMicListening(false);
+      return;
+    }
+    const rec = new Ctor();
+    rec.lang = locale === "kz" ? "kk-KZ" : locale === "ru" ? "ru-RU" : "en-US";
+    rec.interimResults = false;
+    rec.onresult = (e: SpeechRecognitionLikeEvent) => {
+      const text = e.results?.[0]?.[0]?.transcript;
+      if (text) setInputText((prev) => (prev ? `${prev} ${text}` : text));
+      setMicListening(false);
+    };
+    rec.onerror = () => setMicListening(false);
+    rec.onend = () => setMicListening(false);
+    setMicListening(true);
+    try {
+      rec.start();
+    } catch {
+      setMicListening(false);
     }
   };
 
@@ -989,22 +1076,22 @@ function WorkspaceInner() {
           {status === "live" && (
             <>
               <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-              Live
+              {t("ws.live")}
             </>
           )}
           {status === "connecting" && (
             <>
               <Loader2 size={13} className="animate-spin" />
-              {blocks.length === 0 ? "Preparing your lesson…" : "Connecting…"}
+              {blocks.length === 0 ? t("ws.preparing") : t("ws.connecting")}
             </>
           )}
           {status === "reconnecting" && (
             <>
               <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-              Reconnecting…
+              {t("ws.reconnecting")}
             </>
           )}
-          {status === "idle" && "Ready"}
+          {status === "idle" && t("ws.ready")}
         </div>
         <div className="flex items-center gap-2 w-40 justify-end">
           <button
@@ -1012,14 +1099,14 @@ function WorkspaceInner() {
             className="flex items-center gap-1.5 border border-border rounded-full px-3.5 py-1.5 text-sm text-foreground hover:border-foreground transition-colors"
           >
             <FileText size={14} />
-            Material
+            {t("ws.material")}
           </button>
           <button
             onClick={endLesson}
             className="flex items-center gap-1.5 bg-foreground text-background rounded-full px-3.5 py-1.5 text-sm hover:opacity-80 transition-opacity"
           >
             <Square size={11} />
-            End
+            {t("ws.end")}
           </button>
         </div>
       </header>
@@ -1027,12 +1114,12 @@ function WorkspaceInner() {
       {/* Reconnect banner */}
       {status === "reconnecting" && (
         <div className="flex items-center justify-between px-5 py-2.5 bg-primary/25 text-sm text-foreground shrink-0">
-          <span>{error || "Connection lost — rejoin to pick up where you left off."}</span>
+          <span>{error || t("ws.reconnecting")}</span>
           <button
             onClick={rejoin}
             className="ml-4 border border-foreground rounded-full px-3 py-1 text-xs font-medium hover:bg-foreground hover:text-background transition-colors"
           >
-            Rejoin
+            {t("ws.rejoin")}
           </button>
         </div>
       )}
@@ -1203,12 +1290,24 @@ function WorkspaceInner() {
             placeholder={
               sessionId
                 ? awaitingStudent
-                  ? "Type your answer…"
-                  : "Ask Lumi anything…"
-                : "What do you want to learn? e.g. Explain how a neuromorphic chip works"
+                  ? t("ws.answerPh")
+                  : t("ws.askPh")
+                : t("ws.topicPh")
             }
             className="flex-1 h-11 border border-border rounded-md px-3 text-sm outline-none focus:border-foreground transition-colors bg-background"
           />
+          <button
+            onClick={toggleMic}
+            disabled={!sessionId && !workspaceId}
+            title={t("ws.voiceError")}
+            className={`flex items-center justify-center h-11 w-11 border rounded-md transition-colors disabled:opacity-40 ${
+              micListening
+                ? "bg-primary text-foreground border-primary animate-pulse"
+                : "border-border text-muted hover:text-foreground hover:border-foreground"
+            }`}
+          >
+            <Mic size={14} />
+          </button>
           <button
             onClick={handleSend}
             disabled={!inputText.trim() || streaming || (!sessionId && !workspaceId)}
@@ -1274,42 +1373,149 @@ function WorkspaceInner() {
         </button>
       </div>
 
-      {/* Material drawer */}
+      {/* Material drawer — split screen: Files / Summary / Podcast */}
       {materialOpen && (
         <>
           <div className="fixed inset-0 bg-foreground/20 z-40" onClick={() => setMaterialOpen(false)} />
-          <div className="fixed top-0 right-0 h-full w-80 bg-surface border-l border-border z-50 flex flex-col">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">Your material</span>
+          <div className="fixed top-0 right-0 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border z-50 flex flex-col">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ LUMI_CANVAS: MATERIAL ]</span>
               <button onClick={() => setMaterialOpen(false)} className="text-muted hover:text-foreground">
                 <X size={16} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading || !workspaceId}
-                className="flex items-center justify-center gap-2 w-full border border-dashed border-border px-3 py-3 text-sm text-muted hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40"
-              >
-                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {uploading ? "Uploading…" : "Upload PDF"}
-              </button>
-              <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleUpload} />
-              {sources.length === 0 ? (
-                <p className="text-xs text-muted leading-relaxed">
-                  No materials yet. Upload a PDF and Lumi will ground the lesson in it — blocks based on your
-                  documents are tagged “Your material”.
-                </p>
-              ) : (
-                sources.map((s) => (
-                  <div key={s.id} className="flex items-center gap-3 border border-border px-3 py-2.5">
-                    <FileText size={14} className="text-muted shrink-0" />
-                    <div className="min-w-0">
-                      <div className="text-sm truncate">{s.file_name}</div>
-                      <div className="font-mono text-[10px] text-muted">{s.file_hash.slice(0, 8)}</div>
+
+            <div className="flex border-b border-border shrink-0">
+              {(
+                [
+                  { id: "files", label: t("ws.files") },
+                  { id: "summary", label: t("ws.summary") },
+                  { id: "podcast", label: t("ws.podcast") },
+                ] as { id: MaterialTab; label: string }[]
+              ).map((tb) => (
+                <button
+                  key={tb.id}
+                  onClick={() => setMaterialTab(tb.id)}
+                  className={`flex-1 py-3 text-[11px] font-mono uppercase tracking-widest transition-colors ${
+                    materialTab === tb.id
+                      ? "bg-primary text-foreground"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {tb.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {materialTab === "files" && (
+                <>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || !workspaceId}
+                    className="flex items-center justify-center gap-2 w-full border border-dashed border-border px-3 py-3 text-sm text-muted hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40"
+                  >
+                    {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploading ? t("ws.uploading") : t("ws.uploadPdf")}
+                  </button>
+                  <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleUpload} />
+                  {sources.length === 0 ? (
+                    <p className="text-xs text-muted leading-relaxed">
+                      {t("ws.noMaterials")}
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {sources.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleOpenPdf(s.id)}
+                          className={`flex items-center gap-3 w-full border px-3 py-2.5 text-left transition-colors ${
+                            activePdfUrl?.includes(s.id)
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:border-primary"
+                          }`}
+                        >
+                          <FileText size={14} className="text-muted shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm truncate">{s.file_name}</div>
+                            <div className="font-mono text-[10px] text-muted">{s.file_hash.slice(0, 8)}</div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                ))
+                  )}
+                  {activePdfUrl && (
+                    <div className="border border-border bg-background">
+                      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+                        <span className="font-mono text-[10px] uppercase tracking-widest text-muted">{t("ws.pdfViewer")}</span>
+                        <button onClick={() => setActivePdfUrl(null)} className="text-muted hover:text-foreground">
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <iframe src={activePdfUrl} title="Material PDF" className="w-full h-[60vh]" />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {materialTab === "summary" && (
+                <>
+                  {sources.length === 0 ? (
+                    <p className="text-xs text-muted leading-relaxed">
+                      {t("ws.noSummary")}
+                    </p>
+                  ) : (
+                    sources.map((s) => (
+                      <div key={s.id} className="border border-border p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm truncate">{s.file_name}</span>
+                          <button
+                            onClick={() => handleGenerateSummary(s.id)}
+                            disabled={summaryLoading === s.id}
+                            className="shrink-0 flex items-center gap-2 border border-primary text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary/10 transition-all disabled:opacity-40"
+                          >
+                            {summaryLoading === s.id ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
+                            {summaryBySource[s.id] ? t("ws.regenerate") : t("ws.generate")}
+                          </button>
+                        </div>
+                        {summaryBySource[s.id] && (
+                          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">{summaryBySource[s.id]}</p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </>
+              )}
+
+              {materialTab === "podcast" && (
+                <>
+                  {sources.length === 0 ? (
+                    <p className="text-xs text-muted leading-relaxed">
+                      {t("ws.noPodcast")}
+                    </p>
+                  ) : (
+                    sources.map((s) => (
+                      <div key={s.id} className="border border-border p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm truncate">{s.file_name}</span>
+                          <button
+                            onClick={() => handleGeneratePodcast(s.id)}
+                            disabled={podcastLoading === s.id}
+                            className="shrink-0 flex items-center gap-2 border border-primary text-primary px-3 py-1.5 text-xs font-medium hover:bg-primary/10 transition-all disabled:opacity-40"
+                          >
+                            {podcastLoading === s.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                            {podcastBySource[s.id] ? t("ws.regenerate") : t("ws.generate")}
+                          </button>
+                        </div>
+                        {podcastBySource[s.id] ? (
+                          <audio controls src={podcastBySource[s.id]} className="w-full" />
+                        ) : podcastLoading === s.id ? (
+                          <p className="text-xs text-muted">{t("ws.synth")}</p>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </>
               )}
             </div>
           </div>

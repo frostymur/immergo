@@ -88,3 +88,43 @@ class LessonStateResponse(BaseModel):
 class TtsRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     lang: str = Field(default="en", pattern="^(kz|ru|en)$")
+
+
+class DiagnosticStartRequest(BaseModel):
+    grade: int = Field(ge=1, le=12)
+    subject: str = Field(min_length=1, max_length=60)
+    goal: str = Field(default="school", pattern="^(ent|olympiad|school)$")
+    lang: str = Field(default="kz", pattern="^(kz|ru|en)$")
+
+
+class DiagnosticStartResponse(BaseModel):
+    questions: list[dict[str, Any]]
+
+
+class DiagnosticEvaluateRequest(BaseModel):
+    grade: int = Field(ge=1, le=12)
+    subject: str = Field(min_length=1, max_length=60)
+    goal: str = Field(default="school", pattern="^(ent|olympiad|school)$")
+    lang: str = Field(default="kz", pattern="^(kz|ru|en)$")
+    questions: list[dict[str, Any]]
+    answers: list[int]
+
+
+class DiagnosticEvaluateResponse(BaseModel):
+    correct: int
+    total: int
+    level: str
+    feedback: str
+    weak_topics: list[str]
+    recommendation: str
+
+
+class RoadmapRequest(BaseModel):
+    topic: str = Field(min_length=2, max_length=200)
+    goal: str = Field(default="school", pattern="^(ent|olympiad|school)$")
+    lang: str = Field(default="kz", pattern="^(kz|ru|en)$")
+
+
+class RoadmapResponse(BaseModel):
+    topic: str
+    steps: list[dict[str, str]]

@@ -4,7 +4,7 @@ import uuid
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from app.core.config import settings
 from app.db.database import (
@@ -17,12 +17,18 @@ from app.db.database import (
     vector_search,
 )
 from app.schemas.ai import (
+    DiagnosticEvaluateRequest,
+    DiagnosticEvaluateResponse,
+    DiagnosticStartRequest,
+    DiagnosticStartResponse,
     GeneratePodcastRequest,
     GeneratePodcastResponse,
     HeatmapResponse,
     LessonMessageRequest,
     LessonStartRequest,
     LessonStateResponse,
+    RoadmapRequest,
+    RoadmapResponse,
     SocraticAnswerRequest,
     SocraticAnswerResponse,
     SocraticChatRequest,
@@ -35,14 +41,17 @@ from app.schemas.ai import (
 from app.services.embeddings import embed_text, embed_texts_or_hash
 from app.services.llm import (
     evaluate_answer,
+    evaluate_diagnostic,
+    generate_diagnostic_test,
     generate_lesson_plan,
     generate_podcast_script,
+    generate_roadmap,
     generate_summary,
     socratic_response,
     stream_lesson_turn,
 )
 from app.services.pdf_parser import chunk_text, parse_pdf
-from app.services.storage import upload_file
+from app.services.storage import LOCAL_STORAGE_ROOT, download_file, get_supabase, upload_file
 from app.services.tts import generate_podcast_audio, synthesize_text
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -567,3 +576,83 @@ async def teacher_heatmap(workspace_id: str):
     ]
 
     return HeatmapResponse(workspace_id=workspace_id, nodes=nodes)
+
+
+@router.post("/diagnostic/start", response_model=DiagnosticStartResponse)
+async def diagnostic_start(body: DiagnosticStartRequest):
+    questions = await generate_diagnostic_test(
+        subject=body.subject,
+        grade=body.grade,
+        goal=body.goal,
+        lang=body.lang,
+    )
+    if not questions:
+        raise HTTPException(status_code=502, detail="Diagnostic generation failed")
+    return DiagnosticStartResponse(questions=questions)
+
+
+@router.post("/diagnostic/evaluate", response_model=DiagnosticEvaluateResponse)
+async def diagnostic_evaluate(body: DiagnosticEvaluateRequest):
+    questions = body.questions
+    answers = body.answers
+    correct = 0
+    wrong_topics: list[str] = []
+    for i, q in enumerate(questions):
+        try:
+            q = dict(q)
+        except (TypeError, ValueError):
+            continue
+        given = answers[i] if i < len(answers) else -1
+        right = q.get("answer")
+        if isinstance(right, int) and given == right:
+            correct += 1
+        else:
+            wrong_topics.append(str(q.get("q", ""))[:120])
+    total = len(questions) or 1
+    weak_hint = "; ".join(wrong_topics[:5]) if wrong_topics else ""
+    result = await evaluate_diagnostic(
+        subject=body.subject,
+        grade=body.grade,
+        goal=body.goal,
+        lang=body.lang,
+        correct=correct,
+        total=total,
+        weak_topics_hint=weak_hint,
+    )
+    return DiagnosticEvaluateResponse(
+        correct=correct,
+        total=len(questions),
+        level=result["level"],
+        feedback=result["feedback"],
+        weak_topics=result["weak_topics"],
+        recommendation=result["recommendation"],
+    )
+
+
+@router.post("/roadmap", response_model=RoadmapResponse)
+async def roadmap(body: RoadmapRequest):
+    steps = await generate_roadmap(topic=body.topic, goal=body.goal, lang=body.lang)
+    if not steps:
+        raise HTTPException(status_code=502, detail="Roadmap generation failed")
+    return RoadmapResponse(topic=body.topic, steps=steps)
+
+
+@router.get("/source/{source_id}/file")
+async def source_file(source_id: str):
+    src = await fetch_one(
+        "SELECT workspace_id, file_name, storage_path FROM sources WHERE id = $1",
+        uuid.UUID(source_id),
+    )
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found")
+    headers = {"Content-Disposition": f'inline; filename="{src["file_name"]}"'}
+    try:
+        data = await download_file("sources", src["storage_path"])
+        return Response(content=data, media_type="application/pdf", headers=headers)
+    except Exception:
+        local = os.path.join(LOCAL_STORAGE_ROOT, "sources", src["storage_path"])
+        if not os.path.exists(local):
+            raise HTTPException(status_code=502, detail="Source file unavailable")
+        with open(local, "rb") as f:
+            data = f.read()
+        return Response(content=data, media_type="application/pdf", headers=headers)

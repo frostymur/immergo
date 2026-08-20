@@ -194,15 +194,15 @@ export default function TeacherPage() {
           {/* KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-3 border border-border divide-y md:divide-y-0 md:divide-x divide-border bg-surface">
             <div className="p-5">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ CLASSES ]</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.classes")} ]</div>
               <div className="text-2xl font-semibold mt-1">{workspaces.length}</div>
             </div>
             <div className="p-5">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ STUDENTS ]</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.students")} ]</div>
               <div className="text-2xl font-semibold mt-1">{members.length}</div>
             </div>
             <div className="p-5">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ SUCCESS RATE ]</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.successRate")} ]</div>
               <div className="text-2xl font-semibold mt-1">{successRate === null ? "—" : `${successRate}%`}</div>
             </div>
           </div>
@@ -211,16 +211,16 @@ export default function TeacherPage() {
             {/* Class list */}
             <div className="border border-border bg-surface">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ CLASSES ]</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.classes")} ]</span>
                 <button
                   onClick={() => setShowCreate(true)}
                   className="flex items-center gap-1 text-xs font-medium hover:text-primary transition-colors"
                 >
-                  <Plus size={12} /> New
+                  <Plus size={12} /> {t("teacher.new")}
                 </button>
               </div>
               {workspaces.length === 0 ? (
-                <div className="p-4 text-sm text-muted">No classes yet.</div>
+                <div className="p-4 text-sm text-muted">{t("teacher.noClasses")}</div>
               ) : (
                 <div className="divide-y divide-border">
                   {workspaces.map((ws) => (
@@ -262,7 +262,7 @@ export default function TeacherPage() {
                   ) : (
                     <Upload size={20} className="text-muted mb-3" />
                   )}
-                  <p className="text-sm font-medium">{uploading ? "Uploading and indexing…" : t("upload.material")}</p>
+                  <p className="text-sm font-medium">{uploading ? t("teacher.uploading") : t("upload.material")}</p>
                   <p className="text-xs text-muted mt-1 font-mono">PDF · parsed · chunked · embedded</p>
                 </button>
                 <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleUpload} />
@@ -278,7 +278,7 @@ export default function TeacherPage() {
                       className="flex items-center gap-1.5 border border-border bg-surface px-3 py-1.5 text-xs font-medium hover:border-primary transition-colors flex-shrink-0"
                     >
                       {copied ? <Check size={12} /> : <Link2 size={12} />}
-                      {copied ? "Copied" : "Copy"}
+                      {copied ? t("teacher.copied") : t("teacher.copy")}
                     </button>
                   </div>
                 )}
@@ -304,15 +304,15 @@ export default function TeacherPage() {
               [ CLASS_ROSTER ]
             </div>
             {members.length === 0 ? (
-              <div className="p-4 text-sm text-muted">No students have joined yet. Share the class link.</div>
+              <div className="p-4 text-sm text-muted">{t("teacher.noStudents")}</div>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted border-b border-border font-mono uppercase tracking-wider">
-                    <th className="px-4 py-2.5 font-medium">Student</th>
-                    <th className="px-4 py-2.5 font-medium">Completed</th>
-                    <th className="px-4 py-2.5 font-medium">Failed</th>
-                    <th className="px-4 py-2.5 font-medium">Errors</th>
+                    <th className="px-4 py-2.5 font-medium">{t("teacher.studentCol")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("teacher.completedCol")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("teacher.failedCol")}</th>
+                    <th className="px-4 py-2.5 font-medium">{t("teacher.errorsCol")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -336,10 +336,10 @@ export default function TeacherPage() {
             </div>
             {loading ? (
               <div className="flex items-center gap-2 p-6 text-sm text-muted">
-                <Loader2 size={14} className="animate-spin" /> Loading analytics…
+                <Loader2 size={14} className="animate-spin" /> {t("teacher.loadingAnalytics")}
               </div>
             ) : heatmap.length === 0 ? (
-              <div className="p-6 text-sm text-muted">No analytics yet. Ask students to start lessons.</div>
+              <div className="p-6 text-sm text-muted">{t("teacher.noAnalytics")}</div>
             ) : (
               <div className="p-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
                 {heatmap.map((node) => (
@@ -370,32 +370,32 @@ export default function TeacherPage() {
             </div>
             <form onSubmit={handleCreateClass} className="p-4 space-y-3">
               <div>
-                <label className="block text-xs font-medium text-muted mb-1">Class title</label>
+                <label className="block text-xs font-medium text-muted mb-1">{t("teacher.classTitle")}</label>
                 <input
                   value={newClass.title}
                   onChange={(e) => setNewClass({ ...newClass, title: e.target.value })}
                   className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
-                  placeholder="e.g. Physics 09"
+                  placeholder={t("teacher.classTitlePh")}
                   required
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-muted mb-1">Subject</label>
+                  <label className="block text-xs font-medium text-muted mb-1">{t("teacher.subject")}</label>
                   <input
                     value={newClass.subject}
                     onChange={(e) => setNewClass({ ...newClass, subject: e.target.value })}
                     className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
-                    placeholder="Physics"
+                    placeholder={t("teacher.subjectPh")}
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-muted mb-1">Grade</label>
+                  <label className="block text-xs font-medium text-muted mb-1">{t("teacher.grade")}</label>
                   <input
                     value={newClass.grade}
                     onChange={(e) => setNewClass({ ...newClass, grade: e.target.value })}
                     className="w-full h-10 border border-border px-3 text-sm outline-none focus:border-primary"
-                    placeholder="9"
+                    placeholder={t("teacher.gradePh")}
                   />
                 </div>
               </div>
@@ -404,7 +404,7 @@ export default function TeacherPage() {
                 disabled={creating}
                 className="w-full h-10 bg-primary hover:bg-primary-hover disabled:opacity-40 text-foreground text-sm font-medium transition-colors"
               >
-                {creating ? "Creating…" : "Create class"}
+                {creating ? t("teacher.creating") : t("teacher.createClass")}
               </button>
             </form>
           </div>

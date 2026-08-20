@@ -2,22 +2,24 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { MessageSquare, BookOpen, BarChart3, Settings, ChevronDown } from "lucide-react";
+import { Settings, ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-
-const navItems = [
-  { href: "/", label: "Ask anything", icon: MessageSquare },
-  { href: "/workspace", label: "Your lessons", icon: BookOpen },
-  { href: "/teacher", label: "Insights", icon: BarChart3 },
-];
+import { useLocale } from "@/components/LocaleProvider";
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useLocale();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const supabase = createClient();
+
+  const navItems = [
+    { href: "/", label: t("landing.title") },
+    { href: "/workspace", label: t("nav.lessons") },
+    { href: "/teacher", label: t("nav.teacher") },
+  ];
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -54,7 +56,6 @@ export default function Sidebar() {
                     : "text-muted hover:bg-surface hover:text-foreground border border-transparent hover:border-primary"
                 }`}
               >
-                <item.icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
                 <span className="font-mono text-[11px] uppercase tracking-wider">{item.label}</span>
               </Link>
             );
@@ -64,14 +65,14 @@ export default function Sidebar() {
         <div className="my-4 mx-3 border-t border-border" />
 
         <div className="px-3 mb-2">
-          <span className="font-mono text-[10px] text-muted uppercase tracking-widest">Account</span>
+          <span className="font-mono text-[10px] text-muted uppercase tracking-widest">{t("auth.profile")}</span>
         </div>
         <Link
           href="/settings"
           className="flex items-center gap-3 px-3 py-2.5 text-sm text-muted hover:bg-surface hover:text-foreground border border-transparent hover:border-primary transition-colors"
         >
           <Settings size={18} strokeWidth={1.8} />
-          <span className="font-mono text-[11px] uppercase tracking-wider">Settings</span>
+          <span className="font-mono text-[11px] uppercase tracking-wider">{t("nav.settings")}</span>
         </Link>
       </nav>
 
@@ -86,7 +87,7 @@ export default function Sidebar() {
                 {(user || "U").charAt(0).toUpperCase()}
               </div>
               <span className="text-sm font-medium text-foreground flex-1 text-left truncate">
-                {user?.split("@")[0] || "User"}
+                {user?.split("@")[0] || t("nav.you")}
               </span>
               <ChevronDown size={14} className="text-muted" />
             </button>
@@ -96,7 +97,7 @@ export default function Sidebar() {
                   onClick={handleSignOut}
                   className="w-full text-left px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
                 >
-                  Sign out
+                  {t("nav.signout")}
                 </button>
               </div>
             )}
@@ -106,7 +107,7 @@ export default function Sidebar() {
             href="/auth"
             className="flex items-center justify-center w-full px-3 py-2.5 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-colors"
           >
-            <span className="font-mono text-[11px] uppercase tracking-wider">Sign in</span>
+            <span className="font-mono text-[11px] uppercase tracking-wider">{t("auth.login")}</span>
           </Link>
         )}
       </div>

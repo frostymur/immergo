@@ -6,13 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
 import { useLocale, type Locale } from "@/components/LocaleProvider";
 
-const LOCALES: Locale[] = ["kz", "ru"];
-
 export default function SettingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string>("student");
-  const { locale, setLocale } = useLocale();
+  const { locale, setLocale, t } = useLocale();
   const [message, setMessage] = useState("");
   const supabase = createClient();
 
@@ -45,20 +43,20 @@ export default function SettingsPage() {
     if (error) {
       setMessage(error.message);
     } else {
-      setMessage("Saved.");
+      setMessage(t("settings.saved"));
     }
   };
 
   return (
     <div className="p-6 max-w-2xl">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold text-foreground">Settings</h1>
+        <h1 className="text-lg font-semibold text-foreground">{t("settings.title")}</h1>
         <UserAvatar />
       </div>
 
       <div className="bg-surface border border-border p-6 space-y-6">
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">Role</label>
+          <label className="block text-sm font-medium text-foreground mb-2">{t("settings.role")}</label>
           <div className="grid grid-cols-2 gap-2 max-w-xs">
             {["student", "teacher"].map((r) => (
               <button
@@ -70,16 +68,16 @@ export default function SettingsPage() {
                     : "bg-surface text-muted border-border hover:bg-primary/5"
                 }`}
               >
-                {r === "student" ? "Student" : "Teacher"}
+                {r === "student" ? t("settings.student") : t("settings.teacher")}
               </button>
             ))}
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-foreground mb-2">Language</label>
+          <label className="block text-sm font-medium text-foreground mb-2">{t("settings.language")}</label>
           <div className="flex gap-2 max-w-xs">
-            {LOCALES.map((l) => (
+            {(["kz", "ru"] as Locale[]).map((l) => (
               <button
                 key={l}
                 onClick={() => setLocale(l)}
@@ -97,7 +95,7 @@ export default function SettingsPage() {
           onClick={save}
           className="bg-primary hover:bg-primary-hover text-foreground px-6 py-2.5 text-sm font-medium transition-all"
         >
-          Save changes
+          {t("settings.save")}
         </button>
 
         {message && (

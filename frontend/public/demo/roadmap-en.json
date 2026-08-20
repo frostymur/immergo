@@ -1,0 +1,30 @@
+{
+  "topic": "Kinematics",
+  "steps": [
+    {
+      "title": "Basics of motion",
+      "detail": "Displacement, velocity, acceleration.",
+      "duration": "1 week"
+    },
+    {
+      "title": "Uniform motion",
+      "detail": "Equations of uniform rectilinear motion.",
+      "duration": "4 days"
+    },
+    {
+      "title": "Uniformly accelerated motion",
+      "detail": "Acceleration formulas and graphs.",
+      "duration": "1 week"
+    },
+    {
+      "title": "Free fall",
+      "detail": "Gravity acceleration and vertical motion problems.",
+      "duration": "4 days"
+    },
+    {
+      "title": "UNT problems",
+      "detail": "Solve typical UNT kinematics tasks.",
+      "duration": "1 week"
+    }
+  ]
+}

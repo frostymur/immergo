@@ -1,0 +1,32 @@
+[
+  {
+    "q": "A body of mass 2 kg moves at 3 m/s. What is its kinetic energy?",
+    "options": ["3 J", "6 J", "9 J", "12 J"],
+    "answer": 2,
+    "explain": "E = mv²/2 = 2·9/2 = 9 J"
+  },
+  {
+    "q": "What is the SI unit of force?",
+    "options": ["Watt", "Newton", "Pascal", "Joule"],
+    "answer": 1,
+    "explain": "Force is measured in newtons (N)."
+  },
+  {
+    "q": "For a body at rest to stay at rest, the net force on it must be...",
+    "options": ["Zero", "Maximum", "Equal to its weight", "Constant"],
+    "answer": 0,
+    "explain": "Newton's first law: balanced forces keep a body at rest."
+  },
+  {
+    "q": "How far does a body travel in 5 s moving uniformly at 10 m/s?",
+    "options": ["25 m", "50 m", "100 m", "2 m"],
+    "answer": 1,
+    "explain": "s = v·t = 10·5 = 50 m"
+  },
+  {
+    "q": "A 2 A current flows through a 10 Ω resistor. What is the voltage?",
+    "options": ["5 V", "12 V", "20 V", "0.2 V"],
+    "answer": 2,
+    "explain": "U = I·R = 2·10 = 20 V"
+  }
+]

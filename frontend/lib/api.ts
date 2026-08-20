@@ -61,6 +61,59 @@ export async function fetchHeatmap(workspaceId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Diagnostic & Roadmap API
+// ---------------------------------------------------------------------------
+
+export type DiagnosticQuestion = {
+  q: string;
+  options: string[];
+  answer: number;
+  explain?: string;
+};
+
+export type DiagnosticResult = {
+  correct: number;
+  total: number;
+  level: "beginner" | "intermediate" | "advanced";
+  feedback: string;
+  weak_topics: string[];
+  recommendation: string;
+};
+
+export type Goal = "ent" | "olympiad" | "school";
+
+export async function apiDiagnosticStart(grade: number, subject: string, goal: Goal, lang: string) {
+  return apiFetch("/api/ai/diagnostic/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grade, subject, goal, lang }),
+  }) as Promise<{ questions: DiagnosticQuestion[] }>;
+}
+
+export async function apiDiagnosticEvaluate(
+  grade: number,
+  subject: string,
+  goal: Goal,
+  lang: string,
+  questions: DiagnosticQuestion[],
+  answers: number[]
+) {
+  return apiFetch("/api/ai/diagnostic/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grade, subject, goal, lang, questions, answers }),
+  }) as Promise<DiagnosticResult>;
+}
+
+export async function apiRoadmap(topic: string, goal: Goal, lang: string) {
+  return apiFetch("/api/ai/roadmap", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, goal, lang }),
+  }) as Promise<{ topic: string; steps: { title: string; detail: string; duration?: string }[] }>;
+}
+
+// ---------------------------------------------------------------------------
 // Live lesson (whiteboard) API
 // ---------------------------------------------------------------------------
 
