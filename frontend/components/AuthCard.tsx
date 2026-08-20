@@ -18,12 +18,14 @@ const I18N: Record<Locale, Record<string, string>> = {
     wait: "Күте тұрыңыз…",
     signin: "Кіру",
     signup: "Тіркелу",
+    role: "Рөліңіз",
+    studentRole: "Оқушы",
+    teacherRole: "Мұғалім",
     confirmEmail: "Растау үшін email тексеріңіз.",
     failed: "Кіру сәтсіз аяқталды",
     switchLogin: "Аккаунтыңыз бар ма? Кіру",
     switchSignup: "Аккаунтыңыз жоқ па? Тіркелу",
-    sso: "Жылдам кіру (демо)",
-    ssoHint: "Ендіру демонстрация үшін имитацияланады",
+    sso: "Жылдам кіру",
     bilimland: "BilimLand арқылы кіру",
     egov: "eGov ID арқылы кіру",
     connecting: "Қосылуда…",
@@ -40,12 +42,14 @@ const I18N: Record<Locale, Record<string, string>> = {
     wait: "Подождите…",
     signin: "Войти",
     signup: "Регистрация",
+    role: "Ваша роль",
+    studentRole: "Ученик",
+    teacherRole: "Учитель",
     confirmEmail: "Проверьте email для подтверждения.",
     failed: "Не удалось войти",
     switchLogin: "Уже есть аккаунт? Войти",
     switchSignup: "Нет аккаунта? Зарегистрироваться",
-    sso: "Быстрый вход (демо)",
-    ssoHint: "Имитация входа для демонстрации",
+    sso: "Быстрый вход",
     bilimland: "Вход через BilimLand",
     egov: "Вход через eGov ID",
     connecting: "Подключение…",
@@ -62,12 +66,14 @@ const I18N: Record<Locale, Record<string, string>> = {
     wait: "Please wait…",
     signin: "Sign in",
     signup: "Create account",
+    role: "Your role",
+    studentRole: "Student",
+    teacherRole: "Teacher",
     confirmEmail: "Check your email to confirm signup.",
     failed: "Authentication failed",
     switchLogin: "Already have an account? Sign in",
     switchSignup: "Don't have an account? Sign up",
-    sso: "Quick login (demo)",
-    ssoHint: "Simulated login for demonstration",
+    sso: "Quick login",
     bilimland: "Sign in with BilimLand",
     egov: "Sign in with eGov ID",
     connecting: "Connecting…",
@@ -84,11 +90,16 @@ export default function AuthCard() {
   const t = I18N[locale];
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"student" | "teacher">("student");
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [sso, setSso] = useState<"bilimland" | "egov" | null>(null);
   const supabase = createClient();
+
+  const applyRole = async (userId: string) => {
+    await supabase.from("profiles").update({ role }).eq("id", userId);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,13 +107,28 @@ export default function AuthCard() {
     setMessage("");
     try {
       if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        const pending = localStorage.getItem("immergo-pending-role") as "student" | "teacher" | null;
+        if (pending && data.user) {
+          await applyRole(data.user.id);
+          localStorage.removeItem("immergo-pending-role");
+        }
         window.location.href = "/";
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setMessage(t.confirmEmail);
+        if (data.user) {
+          await applyRole(data.user.id);
+        } else {
+          localStorage.setItem("immergo-pending-role", role);
+          setMessage(t.confirmEmail);
+        }
+        if (!data.session) {
+          setMessage(t.confirmEmail);
+          return;
+        }
+        window.location.href = "/";
       }
     } catch (err: any) {
       setMessage(err.message || t.failed);
@@ -159,7 +185,6 @@ export default function AuthCard() {
           {sso === "egov" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} className="text-primary" />}
           {sso === "egov" ? t.connecting : t.egov}
         </button>
-        <p className="text-[10px] text-muted/70">{t.ssoHint}</p>
       </div>
 
       <div className="flex items-center gap-3 mb-5">
@@ -191,6 +216,27 @@ export default function AuthCard() {
             required
           />
         </div>
+        {mode === "signup" && (
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">{t.role}</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(["student", "teacher"] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRole(r)}
+                  className={`py-2.5 text-sm font-medium border transition-all ${
+                    role === r
+                      ? "bg-primary/10 text-primary border-primary/30"
+                      : "bg-surface text-muted border-border hover:bg-primary/5"
+                  }`}
+                >
+                  {r === "student" ? t.studentRole : t.teacherRole}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <button
           type="submit"
           disabled={loading}

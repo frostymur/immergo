@@ -20,7 +20,7 @@ async def synthesize_line(text: str, voice: str, output_path: str) -> None:
 async def synthesize_text(text: str, lang: str = "en") -> str:
     """Synthesize a single text to an MP3 temp file. Returns the file path."""
     voice = VOICE_MAP.get(lang, VOICE_MAP["en"])
-    fd, out_path = tempfile.mkstemp(suffix=".mp3", prefix="lumi_tts_")
+    fd, out_path = tempfile.mkstemp(suffix=".mp3", prefix="immergo_tts_")
     os.close(fd)
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(out_path)

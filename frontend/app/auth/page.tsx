@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { LocaleProvider, useLocale, type Locale } from "@/components/LocaleProvider";
 import AuthCard from "@/components/AuthCard";
 
-const LOCALES: Locale[] = ["kz", "ru"];
+const LOCALES: Locale[] = ["kz", "ru", "en"];
 
 function AuthPageInner() {
   const router = useRouter();
@@ -21,7 +21,7 @@ function AuthPageInner() {
   }, [router, supabase]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen w-full grid place-items-center px-4 py-10">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
           <Link href="/" className="text-2xl font-bold text-primary tracking-tight">immergo</Link>

@@ -180,7 +180,7 @@ If correct, make the next card a short follow-up "question" deepening understand
 
 LESSON_LANG_NAMES = {"kz": "Kazakh", "ru": "Russian", "en": "English"}
 
-LESSON_SYSTEM = """You are Lumi, a live AI tutor teaching a one-on-one lesson on a digital whiteboard.
+LESSON_SYSTEM = """You are Immergo, a live AI tutor teaching a one-on-one lesson on a digital whiteboard.
 You teach by WRITING short notes on the whiteboard and SPEAKING a spoken explanation for each note (read aloud via TTS). The student watches the board and can answer or ask questions at any time.
 
 OUTPUT FORMAT — one JSON object per line (NDJSON). No markdown fences, no commentary, nothing outside the JSON lines. Each line is one whiteboard block:
@@ -225,24 +225,24 @@ def serialize_lesson_history(blocks: list[dict[str, Any]], limit: int = 60) -> s
         if kind == "student":
             lines.append(f"STUDENT: {b.get('text', '')}")
         elif kind == "task":
-            lines.append(f"LUMI (task for student): {b.get('text', '')}")
+            lines.append(f"IMMERGO (task for student): {b.get('text', '')}")
         elif kind == "feedback":
             verdict = "correct" if b.get("correct") else "not quite"
-            lines.append(f"LUMI (feedback, {verdict}): {b.get('text', '')}")
+            lines.append(f"IMMERGO (feedback, {verdict}): {b.get('text', '')}")
         elif kind in ("section", "subsection"):
-            lines.append(f"LUMI (heading): {b.get('title', '')}")
+            lines.append(f"IMMERGO (heading): {b.get('title', '')}")
         elif kind in ("note", "formula"):
-            lines.append(f"LUMI ({kind}): {b.get('text', '')}")
+            lines.append(f"IMMERGO ({kind}): {b.get('text', '')}")
         elif kind in ("bullets", "steps"):
-            lines.append(f"LUMI ({kind}): " + " | ".join(b.get("items", [])))
+            lines.append(f"IMMERGO ({kind}): " + " | ".join(b.get("items", [])))
         elif kind == "table":
-            lines.append(f"LUMI (table): columns={b.get('columns', [])} rows={b.get('rows', [])}")
+            lines.append(f"IMMERGO (table): columns={b.get('columns', [])} rows={b.get('rows', [])}")
         elif kind == "diagram":
             node_repr = "; ".join(f"{n.get('id')}={n.get('label')}" for n in b.get("nodes", []))
             edge_repr = "; ".join("->".join(map(str, e)) for e in b.get("edges", []))
-            lines.append(f"LUMI (diagram): nodes[{node_repr}] edges[{edge_repr}]")
+            lines.append(f"IMMERGO (diagram): nodes[{node_repr}] edges[{edge_repr}]")
         elif kind == "choice":
-            lines.append(f"LUMI (choice): {b.get('title', '')} options={b.get('options', [])}")
+            lines.append(f"IMMERGO (choice): {b.get('title', '')} options={b.get('options', [])}")
     return "\n".join(lines)
 
 

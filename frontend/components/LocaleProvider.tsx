@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export type Locale = "kz" | "ru" | "en";
@@ -102,14 +102,14 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "ws.end": "Аяқтау",
     "ws.rejoin": "Қайта қосылу",
     "ws.answerPh": "Жауабыңызды жазыңыз…",
-    "ws.askPh": "Lumi-ден кез келгенді сұраңыз…",
+    "ws.askPh": "Immergo-дан кез келгенді сұраңыз…",
     "ws.topicPh": "Не үйренгіңіз келеді? Мыс.: нейроморфтық чип қалай жұмыс істейді",
     "ws.files": "ФАЙЛДАР",
     "ws.summary": "ҚОРЫТЫНДЫ",
     "ws.podcast": "ПОДКАСТ",
     "ws.uploadPdf": "PDF жүктеу",
     "ws.uploading": "Жүктелуде…",
-    "ws.noMaterials": "Әзірге материал жоқ. PDF жүктеңіз — Lumi сабақты оған сүйендіреді.",
+    "ws.noMaterials": "Әзірге материал жоқ. PDF жүктеңіз — Immergo сабақты оған сүйендіреді.",
     "ws.regenerate": "Қайта жасау",
     "ws.generate": "Жасау",
     "ws.synth": "Дауыс синтезделуде…",
@@ -207,14 +207,14 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "ws.end": "Завершить",
     "ws.rejoin": "Переподключиться",
     "ws.answerPh": "Введите ваш ответ…",
-    "ws.askPh": "Спросите Lumi что угодно…",
+    "ws.askPh": "Спросите Immergo что угодно…",
     "ws.topicPh": "Что хотите изучить? Напр.: как работает нейроморфный чип",
     "ws.files": "ФАЙЛЫ",
     "ws.summary": "СВОДКА",
     "ws.podcast": "ПОДКАСТ",
     "ws.uploadPdf": "Загрузить PDF",
     "ws.uploading": "Загрузка…",
-    "ws.noMaterials": "Материалов пока нет. Загрузите PDF — Lumi построит урок на его основе.",
+    "ws.noMaterials": "Материалов пока нет. Загрузите PDF — Immergo построит урок на его основе.",
     "ws.regenerate": "Пересоздать",
     "ws.generate": "Создать",
     "ws.synth": "Синтез голоса…",
@@ -312,14 +312,14 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
     "ws.end": "End",
     "ws.rejoin": "Rejoin",
     "ws.answerPh": "Type your answer…",
-    "ws.askPh": "Ask Lumi anything…",
+    "ws.askPh": "Ask Immergo anything…",
     "ws.topicPh": "What do you want to learn? e.g. Explain how a neuromorphic chip works",
     "ws.files": "FILES",
     "ws.summary": "SUMMARY",
     "ws.podcast": "PODCAST",
     "ws.uploadPdf": "Upload PDF",
     "ws.uploading": "Uploading…",
-    "ws.noMaterials": "No materials yet. Upload a PDF and Lumi will ground the lesson in it.",
+    "ws.noMaterials": "No materials yet. Upload a PDF and Immergo will ground the lesson in it.",
     "ws.regenerate": "Regenerate",
     "ws.generate": "Generate",
     "ws.synth": "Synthesizing voice…",
@@ -332,7 +332,7 @@ const DICTIONARY: Record<Locale, Record<string, string>> = {
 };
 
 function normalizeLocale(l: string | null | undefined): Locale {
-  return l === "kz" || l === "ru" ? l : "kz";
+  return l === "kz" || l === "ru" || l === "en" ? l : "kz";
 }
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
@@ -340,25 +340,27 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const saved = localStorage.getItem("immergo-locale");
+    if (saved) {
+      setLocaleState(normalizeLocale(saved));
+    }
     (async () => {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
-      if (data?.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("lang")
-          .eq("id", data.user.id)
-          .single();
-        if (!cancelled && profile?.lang) {
-          const lang = normalizeLocale(profile.lang as string);
-          setLocaleState(lang);
-          localStorage.setItem("lumi-locale", lang);
-          return;
-        }
+      if (!data?.user) {
+        if (!cancelled && !saved) setLocaleState(normalizeLocale(null));
+        return;
       }
-      if (!cancelled) {
-        const saved = localStorage.getItem("lumi-locale");
-        setLocaleState(normalizeLocale(saved));
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("lang")
+        .eq("id", data.user.id)
+        .single();
+      if (cancelled) return;
+      if (profile?.lang && !saved) {
+        const lang = normalizeLocale(profile.lang as string);
+        setLocaleState(lang);
+        localStorage.setItem("immergo-locale", lang);
       }
     })();
     return () => {
@@ -366,9 +368,9 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const setLocale = (l: Locale) => {
+  const setLocale = useCallback((l: Locale) => {
     setLocaleState(l);
-    localStorage.setItem("lumi-locale", l);
+    localStorage.setItem("immergo-locale", l);
     (async () => {
       const supabase = createClient();
       const { data } = await supabase.auth.getUser();
@@ -376,7 +378,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
         await supabase.from("profiles").update({ lang: l }).eq("id", data.user.id);
       }
     })();
-  };
+  }, []);
 
   const t = (key: string) => DICTIONARY[locale][key] || key;
 

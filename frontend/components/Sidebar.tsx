@@ -6,6 +6,7 @@ import { Settings, ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLocale } from "@/components/LocaleProvider";
+import { useUserRole } from "@/lib/useUserRole";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -14,11 +15,12 @@ export default function Sidebar() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const supabase = createClient();
+  const { role } = useUserRole();
 
   const navItems = [
     { href: "/", label: t("landing.title") },
-    { href: "/workspace", label: t("nav.lessons") },
-    { href: "/teacher", label: t("nav.teacher") },
+    { href: "/my-classes", label: t("nav.lessons") },
+    ...(role === "teacher" ? [{ href: "/teacher", label: t("nav.teacher") }] : []),
   ];
 
   useEffect(() => {

@@ -138,7 +138,6 @@ export default function DiagnosticPage() {
   const [answers, setAnswers] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [demoMode, setDemoMode] = useState(false);
 
   const [result, setResult] = useState<DiagnosticResult | null>(null);
 
@@ -159,7 +158,6 @@ export default function DiagnosticPage() {
         const demo = await loadDemoQuestions(locale);
         setQuestions(demo);
         setAnswers(new Array(demo.length).fill(-1));
-        setDemoMode(true);
         setStep("test");
       } catch {
         setError("demo-error");
@@ -181,9 +179,8 @@ export default function DiagnosticPage() {
         correct,
         total: questions.length,
         level: correct >= 4 ? "advanced" : correct >= 2 ? "intermediate" : "beginner",
-        feedback: demoMode
-          ? "Demo mode — live AI evaluation is unavailable, showing sample analysis."
-          : "Evaluation failed — showing score only.",
+        feedback:
+          "Evaluation failed — showing score only.",
         weak_topics: questions
           .map((q, i) => (answers[i] === q.answer ? "" : q.q))
           .filter(Boolean)
@@ -204,7 +201,7 @@ export default function DiagnosticPage() {
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="font-mono text-[10px] uppercase tracking-widest text-primary border border-primary/30 px-2 py-1">
-              [ LUMI_CANVAS: {t.tag} ]
+              [ IMMERGO_CANVAS: {t.tag} ]
             </span>
           </div>
           <button
@@ -305,11 +302,6 @@ export default function DiagnosticPage() {
             <div className="flex items-center justify-between">
               <h1 className="text-xl font-semibold text-foreground">{subject}</h1>
               <div className="flex items-center gap-3 text-xs text-muted">
-                {demoMode && (
-                  <span className="font-mono text-[10px] uppercase tracking-widest border border-border px-2 py-1">
-                    DEMO MODE
-                  </span>
-                )}
                 <span>
                   {answers.filter((a) => a >= 0).length}/{questions.length} {t.qLabel}
                 </span>
@@ -369,11 +361,6 @@ export default function DiagnosticPage() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h1 className="text-xl font-semibold text-foreground">{t.score}</h1>
-              {demoMode && (
-                <span className="font-mono text-[10px] uppercase tracking-widest border border-border px-2 py-1">
-                  DEMO MODE
-                </span>
-              )}
             </div>
 
             <div className="bg-surface border border-border p-8 flex flex-col sm:flex-row items-center gap-8">

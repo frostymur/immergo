@@ -15,7 +15,6 @@ const I18N: Record<Locale, Record<string, string>> = {
     fullLesson: "Толық сабақты бастау",
     back: "Артқа",
     loading: "Жоспар құрылуда…",
-    demo: "ДЕМО ЖОСПАР",
   },
   ru: {
     tag: "ROADMAP",
@@ -25,7 +24,6 @@ const I18N: Record<Locale, Record<string, string>> = {
     fullLesson: "Начать полный урок",
     back: "Назад",
     loading: "Строим план…",
-    demo: "ДЕМО-ПЛАН",
   },
   en: {
     tag: "ROADMAP",
@@ -35,7 +33,6 @@ const I18N: Record<Locale, Record<string, string>> = {
     fullLesson: "Start full lesson",
     back: "Back",
     loading: "Building roadmap…",
-    demo: "DEMO ROADMAP",
   },
 };
 
@@ -59,7 +56,6 @@ export default function RoadmapPage() {
 
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,14 +65,12 @@ export default function RoadmapPage() {
         const data = await apiRoadmap(topic, goal, locale);
         if (!cancelled) {
           setSteps(data.steps);
-          setDemo(false);
         }
       } catch {
         try {
           const demoSteps = await loadDemoRoadmap(locale);
           if (!cancelled) {
             setSteps(demoSteps);
-            setDemo(true);
           }
         } catch {
           if (!cancelled) setSteps([]);
@@ -96,7 +90,7 @@ export default function RoadmapPage() {
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="font-mono text-[10px] uppercase tracking-widest text-primary border border-primary/30 px-2 py-1">
-              [ LUMI_CANVAS: {t.tag} ]
+              [ IMMERGO_CANVAS: {t.tag} ]
             </span>
             <span className="text-sm text-foreground">{topic}</span>
           </div>
@@ -113,11 +107,6 @@ export default function RoadmapPage() {
         <div className="space-y-2 mb-10">
           <h1 className="text-2xl font-semibold text-foreground">{t.title}</h1>
           <p className="text-sm text-muted">{t.subtitle}</p>
-          {demo && (
-            <span className="inline-block font-mono text-[10px] uppercase tracking-widest border border-border px-2 py-1 mt-2">
-              {t.demo}
-            </span>
-          )}
         </div>
 
         {loading ? (

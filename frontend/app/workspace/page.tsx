@@ -105,7 +105,7 @@ function WorkspaceInner() {
     active: boolean;
   } | null>(null);
 
-  // Speech playback (Lumi speaks the board via TTS)
+  // Speech playback (Immergo speaks the board via TTS)
   const [paused, setPaused] = useState(false);
   const [volume, setVolume] = useState(0.9);
   const [speakingKey, setSpeakingKey] = useState<number | null>(null);
@@ -227,7 +227,7 @@ function WorkspaceInner() {
     };
     audio.addEventListener("ended", onEnded);
     // Drive caption + board reveal straight from the audio clock at ~60fps so
-    // notes always appear exactly as Lumi speaks them.
+    // notes always appear exactly as Immergo speaks them.
     let raf = 0;
     const tick = () => {
       if (captionRef.current && audio.duration && isFinite(audio.duration)) {
@@ -344,7 +344,7 @@ function WorkspaceInner() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !sessionId || streaming) return;
-      // Interrupt Lumi when the student speaks — like a real conversation
+      // Interrupt Immergo when the student speaks — like a real conversation
       stopSpeech();
       setStreaming(true);
       setError("");
@@ -552,7 +552,7 @@ function WorkspaceInner() {
   // Board panning (infinite canvas)
   // -------------------------------------------------------------------------
   // Center a plan step's column in the viewport (used by auto-follow, the
-  // plan bar, and the "Follow Lumi" pill).
+  // plan bar, and the "Follow Immergo" pill).
   const centerOn = useCallback((step: number, yRatio = 0.35) => {
     const vp = boardRef.current;
     if (!vp) return;
@@ -567,7 +567,7 @@ function WorkspaceInner() {
     }
   }, []);
 
-  // Follow Lumi: keep the current step centered as the lesson streams in.
+  // Follow Immergo: keep the current step centered as the lesson streams in.
   useEffect(() => {
     if (!follow) return;
     centerOn(currentStep);
@@ -742,7 +742,7 @@ function WorkspaceInner() {
     return false;
   })();
 
-  // When Lumi hands the board over to the student, focus the input box so the
+  // When Immergo hands the board over to the student, focus the input box so the
   // answer can be typed straight away.
   useEffect(() => {
     if (awaitingStudent && !streaming) messageInputRef.current?.focus();
@@ -761,7 +761,7 @@ function WorkspaceInner() {
     const speaking = speakingKey === idx;
     const glow = speaking ? "bg-board-task/40 -mx-3 px-3 rounded" : "";
     // How much of this block is "written" on the board (0..1). Blocks with a
-    // spoken line are revealed as the audio plays: hidden until Lumi starts
+    // spoken line are revealed as the audio plays: hidden until Immergo starts
     // speaking, filled in progressively while speaking, complete once spoken.
     let prog = 1;
     if (block.speak) {
@@ -1049,7 +1049,7 @@ function WorkspaceInner() {
         );
       }
       case "feedback":
-        // The student's answer + Lumi's verdict live in the transcript drawer,
+        // The student's answer + Immergo's verdict live in the transcript drawer,
         // not on the board — the board stays a clean lesson artifact.
         return null;
       case "student":
@@ -1070,7 +1070,7 @@ function WorkspaceInner() {
       <header className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2 w-40">
           <span className="w-4 h-4 rounded-full bg-gradient-to-br from-primary to-secondary inline-block" />
-          <span className="font-semibold text-lg tracking-tight">lumi</span>
+          <span className="font-semibold text-lg tracking-tight">immergo</span>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted">
           {status === "live" && (
@@ -1171,14 +1171,14 @@ function WorkspaceInner() {
               {blocks.length === 0 && status === "connecting" && (
                 <div className="flex items-center justify-center gap-3 text-muted pt-32">
                   <Loader2 size={18} className="animate-spin" />
-                  <span className="font-hand text-xl">Lumi is planning your lesson…</span>
+                  <span className="font-hand text-xl">{t("ws.preparing")}</span>
                 </div>
               )}
               {blocks.length === 0 && status === "idle" && (
                 <div className="max-w-xl mx-auto pt-24 space-y-5 text-center">
                   <h2 className="font-board-serif text-3xl font-bold">What do you want to learn?</h2>
                   <p className="font-hand text-lg text-muted leading-relaxed">
-                    Ask Lumi anything in the box below — it will plan the lesson, write it on this board
+                    Ask Immergo anything in the box below — it will plan the lesson, write it on this board
                     step by step, explain it out loud, and practice with you until it sticks.
                   </p>
                 </div>
@@ -1208,7 +1208,7 @@ function WorkspaceInner() {
                 {streaming && blocks.length > 0 && (
                   <div className="shrink-0 px-8 py-8 flex items-center gap-2 text-muted w-[440px]">
                     <Loader2 size={14} className="animate-spin" />
-                    <span className="font-hand text-base">Lumi is writing…</span>
+                    <span className="font-hand text-base">{t("ws.preparing")}</span>
                   </div>
                 )}
               </div>
@@ -1216,17 +1216,17 @@ function WorkspaceInner() {
           </div>
         </div>
 
-        {/* Follow Lumi pill */}
+        {/* Follow Immergo pill */}
         {!follow && blocks.length > 0 && (
           <button
             onClick={() => setFollow(true)}
             className="absolute top-4 left-1/2 -translate-x-1/2 bg-surface border border-border shadow-sm rounded-full px-4 py-1.5 text-sm font-medium text-foreground hover:border-foreground transition-colors"
           >
-            Follow Lumi
+            Follow Immergo
           </button>
         )}
 
-        {/* Live caption (what Lumi is saying right now) */}
+        {/* Live caption (what Immergo is saying right now) */}
         {caption && (
           <div
             className={`absolute left-1/2 -translate-x-1/2 max-w-3xl w-[92%] pointer-events-none transition-all ${
@@ -1265,7 +1265,7 @@ function WorkspaceInner() {
                   if (b.speak) {
                     return (
                       <div key={i} className="text-sm text-muted">
-                        <span className="font-mono text-[10px] uppercase tracking-widest mr-2">Lumi</span>
+                        <span className="font-mono text-[10px] uppercase tracking-widest mr-2">Immergo</span>
                         {b.speak}
                       </div>
                     );
@@ -1278,7 +1278,7 @@ function WorkspaceInner() {
         )}
       </div>
 
-      {/* Input row — text-only conversation with Lumi */}
+      {/* Input row — text-only conversation with Immergo */}
       <div className="shrink-0 border-t border-border bg-surface px-4 py-3">
         <div className="flex items-center gap-2 max-w-3xl mx-auto">
           <input
@@ -1379,7 +1379,7 @@ function WorkspaceInner() {
           <div className="fixed inset-0 bg-foreground/20 z-40" onClick={() => setMaterialOpen(false)} />
           <div className="fixed top-0 right-0 h-full w-[440px] max-w-[90vw] bg-surface border-l border-border z-50 flex flex-col">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ LUMI_CANVAS: MATERIAL ]</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">[ IMMERGO_CANVAS: MATERIAL ]</span>
               <button onClick={() => setMaterialOpen(false)} className="text-muted hover:text-foreground">
                 <X size={16} />
               </button>

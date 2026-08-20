@@ -7,6 +7,7 @@ import InputCard from "@/components/InputCard";
 import UserAvatar from "@/components/UserAvatar";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
+import { useUserRole } from "@/lib/useUserRole";
 import { BookOpen, Loader2 } from "lucide-react";
 
 type ClassItem = { id: string; title: string; subject: string; grade: string; role: "owner" | "member" };
@@ -18,6 +19,7 @@ export default function Home() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classesLoading, setClassesLoading] = useState(true);
   const supabase = createClient();
+  const { role, loading: roleLoading } = useUserRole();
 
   const suggestedPrompts =
     locale === "kz"
@@ -118,23 +120,28 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
-            <Link href="/diagnostic" className="bg-surface p-5 hover:bg-surface transition-colors">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-primary">[ {t("diagnostic.mode")} ]</div>
-              <div className="text-sm font-semibold mt-2">{t("diagnostic.mode")}</div>
-              <p className="text-xs text-muted mt-1">{t("diagnostic.desc")}</p>
-            </Link>
-            <Link href="/workspace" className="bg-surface p-5 hover:bg-surface transition-colors">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("student.mode")} ]</div>
-              <div className="text-sm font-semibold mt-2">{t("student.mode")}</div>
-              <p className="text-xs text-muted mt-1">{t("student.desc")}</p>
-            </Link>
-            <Link href="/teacher" className="bg-surface p-5 hover:bg-surface transition-colors">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.mode")} ]</div>
-              <div className="text-sm font-semibold mt-2">{t("teacher.mode")}</div>
-              <p className="text-xs text-muted mt-1">{t("teacher.desc")}</p>
-            </Link>
-          </div>
+          {roleLoading ? null : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border border border-border">
+              <Link href="/diagnostic" className="bg-surface p-5 hover:bg-surface transition-colors">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-primary">[ {t("diagnostic.mode")} ]</div>
+                <div className="text-sm font-semibold mt-2">{t("diagnostic.mode")}</div>
+                <p className="text-xs text-muted mt-1">{t("diagnostic.desc")}</p>
+              </Link>
+              {role === "teacher" ? (
+                <Link href="/teacher" className="bg-surface p-5 hover:bg-surface transition-colors">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("teacher.mode")} ]</div>
+                  <div className="text-sm font-semibold mt-2">{t("teacher.mode")}</div>
+                  <p className="text-xs text-muted mt-1">{t("teacher.desc")}</p>
+                </Link>
+              ) : (
+                <Link href="/workspace" className="bg-surface p-5 hover:bg-surface transition-colors">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted">[ {t("student.mode")} ]</div>
+                  <div className="text-sm font-semibold mt-2">{t("student.mode")}</div>
+                  <p className="text-xs text-muted mt-1">{t("student.desc")}</p>
+                </Link>
+              )}
+            </div>
+          )}
 
           {/* My classes */}
           {classesLoading ? (

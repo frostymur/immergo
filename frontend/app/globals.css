@@ -18,7 +18,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Whiteboard block entrance — notes appear as Lumi writes them */
+/* Whiteboard block entrance — notes appear as Immergo writes them */
 @keyframes board-in {
   from {
     opacity: 0;

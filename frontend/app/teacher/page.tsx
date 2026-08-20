@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
 import { fetchHeatmap, uploadPdf } from "@/lib/api";
 import UserAvatar from "@/components/UserAvatar";
+import { useUserRole } from "@/lib/useUserRole";
 import { Upload, FileText, Loader2, Plus, Link2, X, Check } from "lucide-react";
 
 type Workspace = { id: string; title: string; subject: string; grade: string };
@@ -24,7 +26,9 @@ type MemberRow = {
 };
 
 export default function TeacherPage() {
+  const router = useRouter();
   const { t } = useLocale();
+  const { role, loading: roleLoading } = useUserRole();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapNode[]>([]);
@@ -42,6 +46,20 @@ export default function TeacherPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const supabase = createClient();
+
+  useEffect(() => {
+    if (!roleLoading && role !== "teacher") {
+      router.replace("/");
+    }
+  }, [role, roleLoading, router]);
+
+  if (roleLoading || role !== "teacher") {
+    return (
+      <div className="flex-1 flex items-center justify-center min-h-screen">
+        <Loader2 size={20} className="animate-spin text-muted" />
+      </div>
+    );
+  }
 
   const loadWorkspaces = async () => {
     const { data } = await supabase
