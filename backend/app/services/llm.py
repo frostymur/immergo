@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+import re
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -201,6 +202,10 @@ OUTPUT FORMAT — one JSON object per line (NDJSON). No markdown fences, no comm
 {"kind":"plan_update","steps":[{"title":"...","detail":"..."}]}   (optional, only at the very start of a turn) revise the REMAINING lesson steps
 {"kind":"end"}                                                       end of your turn — ALWAYS the last line
 
+VISUAL EXAMPLES — copy these exact JSON shapes when showing a process/flow (diagram) or a comparison (table):
+{"kind":"diagram","nodes":[{"id":"n1","label":"Start","shape":"start"},{"id":"n2","label":"Net force?","shape":"decision"},{"id":"n3","label":"No change","shape":"end"},{"id":"n4","label":"Accelerates","shape":"end"}],"edges":[["n1","n2"],["n2","n3","yes"],["n2","n4","no"]],"speak":"Balanced forces mean no change; an unbalanced net force accelerates the object."}
+{"kind":"table","columns":["Solid","Liquid","Gas"],"rows":[["fixed shape","takes container shape","fills container"],["fixed volume","fixed volume","fills volume"]],"speak":"Here is how the three states of matter compare."}
+
 EXAMPLE — the end of a turn that finishes a step and offers a branch:
 {"kind":"feedback","text":"Exactly — acceleration halves.","correct":true,"speak":"Exactly right. If the mass doubles, the acceleration halves."}
 {"kind":"choice","title":"What's next?","options":["Practice one more","Go deeper into F = ma","Move to the next topic"],"speak":"Where would you like to go next?"}
@@ -208,7 +213,7 @@ EXAMPLE — the end of a turn that finishes a step and offers a branch:
 
 RULES:
 - Written "text"/"items" are concise board notes, not essays. "speak" is natural spoken language (1-3 sentences) that explains the block — never just reads it verbatim. Blocks that need no voice (e.g. "end") omit "speak".
-- Use "diagram" blocks for processes, flows and decision trees (branching); keep labels short and ids unique. Use "table" blocks for comparisons and listings. "speak" briefly explains the visual.
+- VISUALS ARE EXPECTED: use a "table" block for comparisons, listings and pros/cons; use a "diagram" block for processes, flows, cycles, algorithms and decision trees. At least one table or diagram per lesson, in the step where it fits best. "speak" briefly explains the visual. Keep diagram labels short and node ids unique.
 - Teach one sub-topic per turn: a few explanation blocks, then ONE "task" block, then "end" and wait for the student. Never answer your own task.
 - SOCRATIC METHOD: when the student answers a task, open with a "feedback" block. If the answer is wrong or incomplete NEVER reveal the solution — point at the gap and follow with a guiding "note"/"task". If correct ("correct": true), confirm briefly, then continue the lesson with the next sub-topic.
 - ADAPTIVE: the lesson plan is a guide, not a contract. Stay in the current step while the student struggles (extra notes/tasks) and only advance once it is learned; every advance opens a new "section". If the lesson takes an unexpected turn (student confused, wants more depth, topic changes), revise the REMAINING steps with a "plan_update" block at the start of a turn — the system keeps already-DONE steps, so only list what still lies ahead.
@@ -218,6 +223,58 @@ RULES:
 - Write and speak ONLY in {lang_name}.
 - When MATERIAL from the student's own documents is provided, ground the lesson in it.
 """
+
+
+_TABLE_WORDS = (
+    "compare", "comparison", "versus", "vs", "differ", "pros", "cons",
+    "advantage", "disadvantage", "list", "table",
+    "type", "kind", "classif", "сравн", "отлич", "вид", "тип", "список",
+    "сар", "салыстыр", "түр",
+)
+_DIAGRAM_WORDS = (
+    "process", "flow", "stage", "chain", "cycle", "order", "sequence", "path",
+    "decision", "branch", "algorithm", "mechanism", "pipeline", "timeline",
+    "works", "step by step", "how it works", "процесс", "схем",
+    "этап", "порядок", "цепочк", "механизм", "как работает", "жүйе", "кезең",
+)
+
+
+def _has_word(text: str, word: str) -> bool:
+    if " " in word:
+        return word in text
+    return re.search(rf"\b{re.escape(word)}\b", text) is not None
+
+
+def _visual_directive(topic: str, current_step: int, plan: list[dict[str, str]]) -> str:
+    """Return a directive telling the model to write a visual block, or "".
+
+    Looks at the lesson topic (first turn only) plus the current and next plan
+    step. Comparison-ish wording -> "table"; process/flow wording -> "diagram".
+    """
+    candidates: list[str] = []
+    if current_step < 0 and topic:
+        candidates.append(topic)
+    for i in (current_step, current_step + 1):
+        if 0 <= i < len(plan):
+            s = plan[i]
+            candidates.append(f"{s.get('title', '')} {s.get('detail', '')}")
+    text = " ".join(candidates).lower()
+    # Diagram (process/flow) wins over table on conflict: processes are the
+    # most-missed visual, and the user explicitly wants schemes on the board.
+    for word in _DIAGRAM_WORDS:
+        if _has_word(text, word):
+            return ('VISUAL DIRECTIVE: this step/lesson is a process or flow — your output MUST '
+                    'include a "diagram" block in this turn, in the form: '
+                    '{"kind":"diagram","nodes":[{"id":"n1","label":"...","shape":"start"},{"id":"n2","label":"...","shape":"decision"},{"id":"n3","label":"...","shape":"end"}],"edges":[["n1","n2"],["n2","n3","yes"]],"speak":"..."} '
+                    '(max 8 nodes; labels short). Do NOT output a "table" block for this process '
+                    '— use the diagram flowchart instead.')
+    for word in _TABLE_WORDS:
+        if _has_word(text, word):
+            return ('VISUAL DIRECTIVE: this step/lesson compares or lists things — your output '
+                    'MUST include a "table" block in this turn, in the form: '
+                    '{"kind":"table","columns":["A","B"],"rows":[["a1","b1"],["a2","b2"]],"speak":"..."} '
+                    '(max 5 columns, 6 rows). Do NOT explain this comparison only with plain notes.')
+    return ""
 
 
 def serialize_lesson_history(blocks: list[dict[str, Any]], limit: int = 60) -> str:
@@ -313,6 +370,53 @@ def _parse_block_line(line: str) -> dict[str, Any] | None:
     return block
 
 
+async def _generate_visual_block(
+    directive: str,
+    subject: str,
+    lang: str = "en",
+    model: str | None = None,
+) -> dict[str, Any] | None:
+    """Deterministic fallback: when a turn stream ignored a VISUAL DIRECTIVE,
+    ask the LLM (focused, minimal prompt) for the single missing table/diagram
+    block so the whiteboard always gets a visual for comparison/process steps."""
+    kind = "diagram" if "diagram" in directive else "table"
+    schema = (
+        '{"kind":"diagram","nodes":[{"id":"n1","label":"...","shape":"start"},'
+        '{"id":"n2","label":"...","shape":"decision"},{"id":"n3","label":"...","shape":"end"}],'
+        '"edges":[["n1","n2"],["n2","n3","yes"]],"speak":"..."}'
+        if kind == "diagram"
+        else '{"kind":"table","columns":["A","B"],"rows":[["a1","b1"],["a2","b2"]],"speak":"..."}'
+    )
+    client = get_llm_client(lang)
+    model = model or get_llm_model(lang)
+    lang_name = LESSON_LANG_NAMES.get(lang, "English")
+    prompt = (
+        "You are Lumi writing ONE whiteboard block for a student's lesson.\n"
+        f'Output EXACTLY ONE JSON line of the form:\n{schema}\n'
+        f"Make the content a concrete {kind} that explains the step below. "
+        "Keep labels short and ids unique.\n"
+        f"Step: {subject}\n"
+        f"Language: {lang_name}. No other text, no markdown fences, no extra lines."
+    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": f"Output only one valid JSON line for a {kind} block. Language: {lang_name}."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.5,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        for line in raw.splitlines():
+            block = _parse_block_line(line)
+            if block is not None and block.get("kind") == kind:
+                return block
+    except Exception:
+        return None
+    return None
+
+
 async def stream_lesson_turn(
     history: list[dict[str, Any]],
     context: str,
@@ -342,6 +446,9 @@ async def stream_lesson_turn(
     if level_note:
         system += f"\n\nADAPTIVE DIFFICULTY: {level_note}"
 
+    directive = ""
+    directive_kind = ""
+    subject = topic or ""
     if plan:
         current_step = max((b.get("step", -1) for b in history), default=-1)
         plan_lines = "\n".join(
@@ -357,6 +464,16 @@ async def stream_lesson_turn(
             "block at the start of a turn.\n"
             f"LESSON PLAN:\n{plan_lines}"
         )
+        directive = _visual_directive(topic or "", current_step, plan)
+        if directive:
+            system += "\n\n" + directive
+            directive_kind = "diagram" if "diagram" in directive else "table"
+            step_titles = []
+            for i in (current_step, current_step + 1):
+                if 0 <= i < len(plan):
+                    step_titles.append(plan[i].get("title", ""))
+            if step_titles:
+                subject = f"{topic or ''} — steps: {' / '.join(step_titles)}"
 
     transcript = serialize_lesson_history(history)
     parts = []
@@ -370,6 +487,8 @@ async def stream_lesson_turn(
         parts.append("Start the lesson now: greet the student in one short spoken line, then begin teaching the requested topic.")
     if context:
         parts.append(f"MATERIAL from the student's documents:\n{context[:8000]}")
+    if directive:
+        parts.append(directive)
     user_prompt = "\n\n".join(parts)
 
     messages = [
@@ -380,6 +499,7 @@ async def stream_lesson_turn(
     yielded_any = False
     stream = None
     completed = False
+    saw_visuals: set[str] = set()
     try:
         stream = await client.chat.completions.create(
             model=model,
@@ -408,13 +528,22 @@ async def stream_lesson_turn(
                     continue
                 if saw_end:
                     continue
+                if block.get("kind") in ("table", "diagram"):
+                    saw_visuals.add(block["kind"])
                 yielded_any = True
                 yield block
         completed = True
         if not saw_end:
             block = _parse_block_line(buffer)
             if block is not None and block.get("kind") != "end":
+                if block.get("kind") in ("table", "diagram"):
+                    saw_visuals.add(block["kind"])
                 yield block
+        if directive_kind and directive_kind not in saw_visuals:
+            if not any(b.get("kind") == directive_kind for b in history):
+                vb = await _generate_visual_block(directive, subject, lang, model)
+                if vb:
+                    yield vb
     except Exception:
         if yielded_any:
             # Stream died mid-turn: keep the blocks already written and stop.
@@ -435,8 +564,15 @@ async def stream_lesson_turn(
             if block is None:
                 continue
             if block.get("kind") == "end":
-                return
+                continue
+            if block.get("kind") in ("table", "diagram"):
+                saw_visuals.add(block["kind"])
             yield block
+        if directive_kind and directive_kind not in saw_visuals:
+            if not any(b.get("kind") == directive_kind for b in history):
+                vb = await _generate_visual_block(directive, subject, lang, model)
+                if vb:
+                    yield vb
     finally:
         if stream is not None and not completed:
             try:
