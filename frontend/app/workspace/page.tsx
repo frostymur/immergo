@@ -852,6 +852,34 @@ function WorkspaceInner() {
     setFollow(false);
   };
 
+  // Pinch-to-zoom for touch devices
+  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  const getTouchDist = (t1: React.Touch, t2: React.Touch) =>
+    Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const dist = getTouchDist(e.touches[0], e.touches[1]);
+      pinchRef.current = { dist, zoom };
+    }
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      e.preventDefault();
+      const dist = getTouchDist(e.touches[0], e.touches[1]);
+      const factor = dist / pinchRef.current.dist;
+      setZoom((z) => Math.min(1.6, Math.max(0.6, Math.round(pinchRef.current!.zoom * factor * 10) / 10)));
+    }
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (e.touches.length < 2) {
+      pinchRef.current = null;
+    }
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -1188,33 +1216,35 @@ function WorkspaceInner() {
         const shownRows = allRows.slice(0, Math.max(1, Math.ceil(allRows.length * prog)));
         return (
           <div key={idx} className={`animate-board-in ${glow}`}>
-            <table className="w-full border-collapse text-sm font-hand text-foreground">
-              {columns.length > 0 && (
-                <thead>
-                  <tr>
-                    {columns.map((c, i) => (
-                      <th
-                        key={i}
-                        className="border border-board-line bg-board-task/30 px-3 py-1.5 text-left font-semibold"
-                      >
-                        {renderRich(c)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-              )}
-              <tbody>
-                {shownRows.map((r, ri) => (
-                  <tr key={ri}>
-                    {r.map((cell, ci) => (
-                      <td key={ci} className="border border-board-line px-3 py-1.5 align-top">
-                        {renderRich(cell)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto -mx-2 px-2">
+              <table className="w-full border-collapse text-sm font-hand text-foreground min-w-[320px]">
+                {columns.length > 0 && (
+                  <thead>
+                    <tr>
+                      {columns.map((c, i) => (
+                        <th
+                          key={i}
+                          className="border border-board-line bg-board-task/30 px-3 py-1.5 text-left font-semibold whitespace-nowrap"
+                        >
+                          {renderRich(c)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  {shownRows.map((r, ri) => (
+                    <tr key={ri}>
+                      {r.map((cell, ci) => (
+                        <td key={ci} className="border border-board-line px-3 py-1.5 align-top">
+                          {renderRich(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         );
       }
@@ -1528,6 +1558,9 @@ function WorkspaceInner() {
         <div
           ref={boardRef}
           onWheel={onWheel}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
           {...(!highlightMode ? {
             onPointerDown,
             onPointerMove,
@@ -1570,7 +1603,7 @@ function WorkspaceInner() {
                   tiles sideways instead of growing into a tall ribbon. Each
                   block's cell is fixed by its index, so revealed blocks never
                   reflow other columns. */}
-              <div className="flex items-start gap-8 px-8">
+              <div className="flex items-start gap-4 sm:gap-8 px-4 sm:px-8">
                 {columns.map((col, ci) => {
                   const chunks = [];
                   for (let i = 0; i < col.blocks.length; i += 6) {
@@ -1580,16 +1613,16 @@ function WorkspaceInner() {
                     <div
                       key={ci}
                       data-step={ci}
-                      className={`py-8 flex items-start gap-8 ${
+                      className={`py-8 flex items-start gap-4 sm:gap-8 ${
                         ci === currentStep ? "bg-board-task/5" : ""
                       }`}
                     >
                       {chunks.map((chunk, cidx) => (
-                        <div key={cidx} className="flex flex-col w-[440px] gap-4">
+                        <div key={cidx} className="flex flex-col w-[min(440px,calc(100vw-80px))] sm:w-[440px] gap-4">
                           {chunk.map((b, i) => {
                             const globalIdx = col.start + cidx * 6 + i;
                             return (
-                              <div key={globalIdx} className="w-[440px]" data-block-idx={globalIdx}>
+                              <div key={globalIdx} className="w-[min(440px,calc(100vw-80px))] sm:w-[440px]" data-block-idx={globalIdx}>
                                 {renderBlock(b, globalIdx)}
                               </div>
                             );
@@ -1600,7 +1633,7 @@ function WorkspaceInner() {
                   );
                 })}
                 {streaming && blocks.length > 0 && (
-                  <div className="shrink-0 px-8 py-8 flex items-center gap-2 text-muted w-[440px]">
+                  <div className="shrink-0 px-4 sm:px-8 py-8 flex items-center gap-2 text-muted w-[min(440px,calc(100vw-80px))] sm:w-[440px]">
                     <Loader2 size={14} className="animate-spin" />
                     <span className="font-hand text-base">{t("ws.preparing")}</span>
                   </div>
@@ -1636,18 +1669,18 @@ function WorkspaceInner() {
       </div>
 
       {/* Input row — text-only conversation with Immergo */}
-      <div className="shrink-0 border-t border-border bg-surface px-4 py-3">
+      <div className="shrink-0 border-t border-border bg-surface px-3 sm:px-4 py-3">
         {sessionId && (
           <div className="flex items-center gap-2 max-w-3xl mx-auto mb-2">
             <button
               onClick={() => queueStudentMessage(t("ws.simpler"))}
-              className="border border-border rounded-full px-3 py-1 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors"
+              className="border border-border rounded-full px-4 py-2.5 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors min-h-[44px] flex items-center"
             >
               {t("ws.simpler")}
             </button>
             <button
               onClick={() => queueStudentMessage(t("ws.quizMe"))}
-              className="border border-border rounded-full px-3 py-1 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors"
+              className="border border-border rounded-full px-4 py-2.5 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors min-h-[44px] flex items-center"
             >
               {t("ws.quizMe")}
             </button>
@@ -1701,7 +1734,7 @@ function WorkspaceInner() {
       </div>
 
       {/* Bottom control bar */}
-      <div className="flex items-center gap-3 h-14 px-4 border-t border-border bg-surface shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 h-14 px-3 sm:px-4 border-t border-border bg-surface shrink-0">
         <span className="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-secondary inline-block shrink-0" />
         <button
           onClick={togglePause}
@@ -1710,8 +1743,8 @@ function WorkspaceInner() {
         >
           {paused ? <Play size={15} /> : <Pause size={15} />}
         </button>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setVolume(volume === 0 ? 0.9 : 0)} className="text-muted hover:text-foreground transition-colors">
+        <div className="flex items-center gap-1 sm:gap-2">
+          <button onClick={() => setVolume(volume === 0 ? 0.9 : 0)} className="text-muted hover:text-foreground transition-colors p-2">
             {volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
           <input
@@ -1721,24 +1754,24 @@ function WorkspaceInner() {
             step={0.05}
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-14 sm:w-20 accent-foreground"
+            className="w-14 sm:w-20 accent-foreground hidden sm:block"
           />
         </div>
 
         <div className="flex-1" />
 
-        {/* Zoom */}
-        <div className="flex items-center gap-1 text-muted">
+        {/* Zoom — hidden on mobile, shown on sm+ */}
+        <div className="hidden sm:flex items-center gap-1 text-muted">
           <button
             onClick={() => setZoom((z) => Math.max(0.6, Math.round((z - 0.1) * 10) / 10))}
-            className="w-7 h-7 flex items-center justify-center hover:text-foreground transition-colors"
+            className="w-9 h-9 flex items-center justify-center hover:text-foreground transition-colors"
           >
             <Minus size={14} />
           </button>
           <span className="text-xs font-mono w-10 text-center">{Math.round(zoom * 100)}%</span>
           <button
             onClick={() => setZoom((z) => Math.min(1.6, Math.round((z + 0.1) * 10) / 10))}
-            className="w-7 h-7 flex items-center justify-center hover:text-foreground transition-colors"
+            className="w-9 h-9 flex items-center justify-center hover:text-foreground transition-colors"
           >
             <Plus size={14} />
           </button>
