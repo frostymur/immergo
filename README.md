@@ -9,7 +9,7 @@ Teaches any subject in **KZ / RU / EN** with real-time voice, math rendering, ad
 ---
 
 ![FUTURE MINDS 2026](https://img.shields.io/badge/FUTURE%20MINDS-2026-blue?style=for-the-badge&labelColor=1a1a2e)
-![SOCIAL IMPACT](https://img.shields.io/badge/SOCIAL%20IMPACT-Finalist-green?style=for-the-badge&labelColor=1a1a2e)
+![SOCIAL IMPACT](https://img.shields.io/badge/SOCIAL%20IMPACT-Kazakhstan-green?style=for-the-badge&labelColor=1a1a2e)
 ![LIVE DEMO](https://img.shields.io/badge/LIVE-localhost:3000-red?style=for-the-badge&labelColor=1a1a2e)
 ![PYTHON](https://img.shields.io/badge/PYTHON-3.12-yellow?style=for-the-badge&labelColor=1a1a2e&logo=python&logoColor=white)
 ![NEXT.JS](https://img.shields.io/badge/NEXT.JS-16-black?style=for-the-badge&labelColor=1a1a2e&logo=next.js&logoColor=white)
@@ -21,7 +21,7 @@ Teaches any subject in **KZ / RU / EN** with real-time voice, math rendering, ad
 
 </div>
 
-## 🏆 Final Round Submission
+## 🏆 Submission
 
 > **Team** — Future Minds 2026 · Social Impact Hackathon, Kazakhstan
 
