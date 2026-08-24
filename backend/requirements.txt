@@ -14,4 +14,4 @@ pypdf
 httpx
 supabase
 pydub
-audioop-lts
+audioop-lts; python_version >= "3.13"
