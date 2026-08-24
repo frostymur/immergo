@@ -10,7 +10,7 @@ Teaches any subject in **KZ / RU / EN** with real-time voice, math rendering, ad
 
 ![FUTURE MINDS 2026](https://img.shields.io/badge/FUTURE%20MINDS-2026-blue?style=for-the-badge&labelColor=1a1a2e)
 ![SOCIAL IMPACT](https://img.shields.io/badge/SOCIAL%20IMPACT-Kazakhstan-green?style=for-the-badge&labelColor=1a1a2e)
-![LIVE DEMO](https://img.shields.io/badge/LIVE-localhost:3000-red?style=for-the-badge&labelColor=1a1a2e)
+![LIVE DEMO](https://img.shields.io/badge/LIVE-immergo.vercel.app-green?style=for-the-badge&labelColor=1a1a2e)
 ![PYTHON](https://img.shields.io/badge/PYTHON-3.12-yellow?style=for-the-badge&labelColor=1a1a2e&logo=python&logoColor=white)
 ![NEXT.JS](https://img.shields.io/badge/NEXT.JS-16-black?style=for-the-badge&labelColor=1a1a2e&logo=next.js&logoColor=white)
 ![FASTAPI](https://img.shields.io/badge/FASTAPI-0.129-teal?style=for-the-badge&labelColor=1a1a2e&logo=fastapi&logoColor=white)
@@ -27,7 +27,7 @@ Teaches any subject in **KZ / RU / EN** with real-time voice, math rendering, ad
 
 ### 🌐 Live Platform
 
-Access the full platform at: **`http://localhost:3000`**
+Access the full platform at: **[immergo.vercel.app](https://immergo.vercel.app)**
 
 - **Student Portal** — Adaptive AI lessons, diagnostic tests, learning roadmap, voice tutor
 - **Teacher Dashboard** — Class analytics, weak-topic heatmaps, student management
