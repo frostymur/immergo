@@ -565,6 +565,9 @@ export default function TeacherPage() {
                 <div className="flex items-center gap-2 mb-3">
                   <TrendingUp size={14} className="text-red-500" />
                   <span className="text-sm font-medium">{t("teacher.struggling")}</span>
+                  <span className="font-mono text-[9px] uppercase tracking-widest text-muted ml-auto">
+                    {t("teacher.fromDiagnostic")}
+                  </span>
                 </div>
                 {analytics && analytics.topics.length > 0 ? (
                   <div className="space-y-3">
@@ -733,8 +736,13 @@ export default function TeacherPage() {
 
           {/* Heatmap */}
           <div className="border border-border bg-surface">
-            <div className="px-4 py-3 border-b border-border font-mono text-[10px] uppercase tracking-widest text-muted">
-              [ HEATMAP: STUMBLING NODES ]
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                [ HEATMAP: STUMBLING NODES ]
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                {t("teacher.fromLessons")}
+              </span>
             </div>
             {loading ? (
               <div className="flex items-center gap-2 p-6 text-sm text-muted">
