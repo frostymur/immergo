@@ -81,6 +81,7 @@ function WorkspaceInner() {
   const lessonParam = searchParams.get("lesson");
   const assignmentParam = searchParams.get("assignment");
   const lessonLevel = (searchParams.get("level") || "intermediate") as "beginner" | "intermediate" | "advanced";
+  const weakParam = (searchParams.get("weak") || "").split(",").map((s) => s.trim()).filter(Boolean);
 
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [lessonTitle, setLessonTitle] = useState<string>(topic);
@@ -422,7 +423,8 @@ function WorkspaceInner() {
           onError: handleStreamError,
         },
         controller.signal,
-        lessonLevel
+        lessonLevel,
+        weakParam
       ).then(() => {
         if (!sawDone && !controller.signal.aborted) handleStreamError();
       });

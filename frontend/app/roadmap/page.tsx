@@ -147,6 +147,7 @@ type SavedPlan = {
   stages: RoadmapData["stages"];
   total_weeks: number;
   deadline: string | null;
+  weak_topics: string[];
   created_at: string;
 };
 
@@ -199,7 +200,7 @@ function RoadmapPageInner() {
       if (userId) {
         const { data } = await supabase
           .from("roadmap_plans")
-          .select("id, topic, goal, level, stages, total_weeks, deadline, created_at")
+          .select("id, topic, goal, level, stages, total_weeks, deadline, weak_topics, created_at")
           .eq("user_id", userId)
           .ilike("topic", topic)
           .eq("goal", goal)
@@ -213,6 +214,8 @@ function RoadmapPageInner() {
       if (existing && !cancelled) {
         setPlanId(existing.id);
         setDeadline(existing.deadline);
+        // Use weak_topics from saved plan if available, otherwise fall back to URL param
+        const savedWeakTopics = existing.weak_topics || [];
         setPlan({
           topic: existing.topic,
           goal: existing.goal as Goal,
@@ -220,6 +223,7 @@ function RoadmapPageInner() {
           stages: existing.stages,
           total_weeks: existing.total_weeks,
           deadline: existing.deadline,
+          weak_topics: savedWeakTopics,
         });
         const { data: progress } = userId
           ? await supabase
@@ -244,6 +248,7 @@ function RoadmapPageInner() {
           stages: demo.stages,
           total_weeks: demo.total_weeks || demo.stages.length,
           deadline: null,
+          weak_topics: weakTopics,
         };
       }
       if (cancelled) return;
@@ -263,6 +268,7 @@ function RoadmapPageInner() {
             stages: data.stages,
             total_weeks: data.total_weeks,
             deadline: computedDeadline,
+            weak_topics: weakTopics,
           })
           .select("id")
           .single();
@@ -445,12 +451,12 @@ function RoadmapPageInner() {
               <Settings size={12} /> {t.editPlan}
             </button>
           </div>
-          {weakTopics.length > 0 && (
+          {((plan?.weak_topics && plan.weak_topics.length > 0) || weakTopics.length > 0) && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
               <span className="font-mono text-[10px] uppercase tracking-widest text-primary border border-primary/30 px-2 py-1">
                 {t.weakTopics}
               </span>
-              {weakTopics.slice(0, 5).map((w, i) => (
+              {(plan?.weak_topics && plan.weak_topics.length > 0 ? plan.weak_topics : weakTopics).slice(0, 5).map((w, i) => (
                 <span key={i} className="text-xs border border-border px-2.5 py-1 text-muted">
                   {w}
                 </span>
@@ -652,7 +658,7 @@ function RoadmapPageInner() {
                           <button
                             onClick={() =>
                               router.push(
-                                `/workspace?topic=${encodeURIComponent(s.topics?.[0] || s.title)}&level=${plan.level}`
+                                `/workspace?topic=${encodeURIComponent(s.topics?.[0] || s.title)}&level=${plan.level}&weak=${encodeURIComponent((plan?.weak_topics || []).join(","))}`
                               )
                             }
                             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-all ${
@@ -683,7 +689,7 @@ function RoadmapPageInner() {
             </div>
 
             <button
-              onClick={() => router.push(`/workspace?topic=${encodeURIComponent(plan.stages[0].topics?.[0] || topic)}&level=${plan.level}`)}
+              onClick={() => router.push(`/workspace?topic=${encodeURIComponent(plan.stages[0].topics?.[0] || topic)}&level=${plan.level}&weak=${encodeURIComponent((plan?.weak_topics || []).join(","))}`)}
               className="flex items-center justify-center gap-2 w-full px-5 py-3.5 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-all"
             >
               <BookOpen size={15} /> {t.fullLesson}

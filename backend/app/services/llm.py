@@ -649,6 +649,7 @@ async def stream_lesson_turn(
     model: str | None = None,
     verdict: dict[str, Any] | None = None,
     profile: dict[str, Any] | None = None,
+    weak_topics: list[str] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream one lesson turn from the LLM as parsed whiteboard blocks.
 
@@ -690,6 +691,14 @@ async def stream_lesson_turn(
             
         if profile_notes:
             system += "\n\nABOUT THE STUDENT:\n- " + "\n- ".join(profile_notes)
+
+    if weak_topics:
+        weak_list = "\n- ".join(weak_topics[:6])
+        system += (
+            f"\n\nWEAK TOPICS — the student scored low on these topics in their diagnostic. "
+            f"Prioritize these topics with deeper explanations, more examples, and extra practice. "
+            f"Cover them FIRST before moving to other content:\n- {weak_list}"
+        )
 
     directive = ""
     directive_kind = ""

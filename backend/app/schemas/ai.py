@@ -74,6 +74,7 @@ class LessonStartRequest(BaseModel):
     prompt: str
     lang: str = Field(default="en", pattern="^(kz|ru|en)$")
     level: str = Field(default="intermediate", pattern="^(beginner|intermediate|advanced)$")
+    weak_topics: list[str] = []
 
 
 class LessonMessageRequest(BaseModel):
@@ -137,6 +138,7 @@ class RoadmapResponse(BaseModel):
     stages: list[dict[str, Any]]
     total_weeks: int = 0
     deadline: Optional[str] = None
+    weak_topics: list[str] = []
 
 
 class HighlightCreate(BaseModel):

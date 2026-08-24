@@ -22,6 +22,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     plans: "Дайындық жоспарлары",
     weak: "Слабын жаттықтыру керек тақырыптар",
     noWeak: "Керемет! Әзірге айқын қателіктер жоқ.",
+    diagnosticWeak: "Диагностика бойынша әлсіз тақырыптар",
+    lessonWeak: "Сабақтағы қателер",
+    diagnosticLevel: "Деңгей",
+    diagnosticFeedback: "сыныс",
     goal: "Мақсат",
     deadline: "Дедлайн",
     daysLeft: "күн қалды",
@@ -76,6 +80,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     plans: "Планы подготовки",
     weak: "Темы для проработки",
     noWeak: "Отлично! Явных пробелов пока нет.",
+    diagnosticWeak: "Слабые темы по диагностике",
+    lessonWeak: "Ошибки на уроках",
+    diagnosticLevel: "Уровень",
+    diagnosticFeedback: "Рекомендация",
     goal: "Цель",
     deadline: "Дедлайн",
     daysLeft: "дней осталось",
@@ -130,6 +138,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     plans: "Study plans",
     weak: "Topics to work on",
     noWeak: "Great! No obvious gaps yet.",
+    diagnosticWeak: "Weak topics from diagnostic",
+    lessonWeak: "Lesson mistakes",
+    diagnosticLevel: "Level",
+    diagnosticFeedback: "Recommendation",
     goal: "Goal",
     deadline: "Deadline",
     daysLeft: "days left",
@@ -321,7 +333,16 @@ export default function DashboardPage() {
     planStagesTotal: 0,
   });
   const [weak, setWeak] = useState<WeakNode[]>([]);
-  const [lastDiagnostic, setLastDiagnostic] = useState<{ subject: string; goal: string; correct: number; total: number } | null>(null);
+  const [lastDiagnostic, setLastDiagnostic] = useState<{
+    subject: string;
+    goal: string;
+    correct: number;
+    total: number;
+    level?: string;
+    weak_topics?: string[];
+    feedback?: string;
+    recommendation?: string;
+  } | null>(null);
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [planDoneCount, setPlanDoneCount] = useState(0);
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
@@ -418,13 +439,12 @@ export default function DashboardPage() {
 
       const { data: diags } = await supabase
         .from("diagnostic_results")
-        .select("subject, goal, correct, total, created_at")
+        .select("subject, goal, correct, total, created_at, level, weak_topics, feedback, recommendation")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(1);
       if (diags && diags.length > 0) {
         setLastDiagnostic(diags[0]);
-        // Also optionally add diag to activity map, but we'll stick to progress for now
       }
 
       const { data: plans } = await supabase
@@ -599,7 +619,7 @@ export default function DashboardPage() {
       title: `${plan.topic} · ${plan.goal.toUpperCase()}`,
       sub: t.planDeadline,
       when: new Date(plan.deadline).getTime(),
-      cta: `/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}`,
+      cta: `/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}&weak=${encodeURIComponent((lastDiagnostic?.weak_topics || []).join(","))}`,
       ctaLabel: t.startPlan,
     });
   }
@@ -863,7 +883,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <Link
-                href={`/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}&level=${plan.level || "intermediate"}`}
+                href={`/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}&level=${plan.level || "intermediate"}&weak=${encodeURIComponent((lastDiagnostic?.weak_topics || []).join(","))}`}
                 className="flex items-center gap-2 text-sm text-primary hover:underline"
               >
                 {t.startPlan} <ArrowRight size={13} />
@@ -880,30 +900,57 @@ export default function DashboardPage() {
           )}
 
           {/* Weak topics */}
-          <div className="bg-surface border border-border p-5 space-y-3">
+          <div className="bg-surface border border-border p-5 space-y-4">
             <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
               <XCircle size={12} /> {t.weak}
             </div>
-            {weak.length === 0 ? (
-              <p className="text-sm text-muted">{t.noWeak}</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {weak.map((w, i) => {
-                  const label = w.node_id.startsWith("lesson:")
-                    ? w.node_id.slice(7).replace(/-/g, " ").trim()
-                    : w.node_id;
-                  return (
-                    <span key={i} className="text-xs border border-red-200 bg-red-50 text-red-700 px-3 py-1.5" title={w.node_id}>
-                      <span className="capitalize">{label}</span> · {w.errors}
+
+            {/* Diagnostic weak topics */}
+            {lastDiagnostic?.weak_topics && lastDiagnostic.weak_topics.length > 0 && (
+              <div className="space-y-2">
+                <div className="font-mono text-[9px] uppercase tracking-widest text-primary">{t.diagnosticWeak}</div>
+                <div className="flex flex-wrap gap-2">
+                  {lastDiagnostic.weak_topics.slice(0, 6).map((topic, i) => (
+                    <span key={i} className="text-xs border border-primary/30 bg-primary/5 text-foreground px-3 py-1.5">
+                      {topic}
                     </span>
-                  );
-                })}
+                  ))}
+                </div>
+                {lastDiagnostic.level && (
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <span className="font-mono text-[9px] uppercase tracking-widest">{t.diagnosticLevel}:</span>
+                    <span className="capitalize">{lastDiagnostic.level}</span>
+                    <span>·</span>
+                    <span>{lastDiagnostic.correct}/{lastDiagnostic.total} ({Math.round((lastDiagnostic.correct / Math.max(1, lastDiagnostic.total)) * 100)}%)</span>
+                  </div>
+                )}
+                {lastDiagnostic.recommendation && (
+                  <p className="text-xs text-muted italic">&ldquo;{lastDiagnostic.recommendation}&rdquo;</p>
+                )}
               </div>
             )}
-            {lastDiagnostic && (
-              <p className="text-xs text-muted">
-                {t.last}: {lastDiagnostic.subject} — {lastDiagnostic.correct}/{lastDiagnostic.total} ({Math.round((lastDiagnostic.correct / Math.max(1, lastDiagnostic.total)) * 100)}%)
-              </p>
+
+            {/* Lesson mistakes */}
+            {weak.length > 0 && (
+              <div className="space-y-2">
+                <div className="font-mono text-[9px] uppercase tracking-widest text-muted">{t.lessonWeak}</div>
+                <div className="flex flex-wrap gap-2">
+                  {weak.map((w, i) => {
+                    const label = w.node_id.startsWith("lesson:")
+                      ? w.node_id.slice(7).replace(/-/g, " ").trim()
+                      : w.node_id;
+                    return (
+                      <span key={i} className="text-xs border border-red-200 bg-red-50 text-red-700 px-3 py-1.5" title={w.node_id}>
+                        <span className="capitalize">{label}</span> · {w.errors}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {weak.length === 0 && (!lastDiagnostic?.weak_topics || lastDiagnostic.weak_topics.length === 0) && (
+              <p className="text-sm text-muted">{t.noWeak}</p>
             )}
           </div>
 

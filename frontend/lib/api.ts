@@ -121,6 +121,7 @@ export type RoadmapData = {
   stages: RoadmapStage[];
   total_weeks: number;
   deadline: string | null;
+  weak_topics: string[];
 };
 
 export async function apiRoadmap(
@@ -244,13 +245,14 @@ export async function streamLessonStart(
   lang: string,
   handlers: LessonStreamHandlers,
   signal?: AbortSignal,
-  level: string = "intermediate"
+  level: string = "intermediate",
+  weakTopics: string[] = []
 ) {
   try {
     const res = await fetch(`${API_BASE}/api/ai/lesson/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace_id: workspaceId, prompt, lang, level }),
+      body: JSON.stringify({ workspace_id: workspaceId, prompt, lang, level, weak_topics: weakTopics }),
       signal,
     });
     await consumeSseStream(res, handlers);

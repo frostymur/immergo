@@ -381,6 +381,7 @@ async def _stream_lesson(
     plan: list[dict[str, str]] | None = None,
     level: str = "intermediate",
     verdict: dict[str, Any] | None = None,
+    weak_topics: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE generator: streams one tutor turn, persisting each block.
 
@@ -429,6 +430,7 @@ async def _stream_lesson(
             level=level,
             verdict=verdict,
             profile=profile,
+            weak_topics=weak_topics,
         ):
             if block.get("kind") == "plan_update":
                 new_steps = [
@@ -476,14 +478,15 @@ async def lesson_start(body: LessonStartRequest):
 
     await execute(
         """
-        INSERT INTO lesson_sessions (id, workspace_id, prompt, lang, plan)
-        VALUES ($1, $2, $3, $4, $5::jsonb)
+        INSERT INTO lesson_sessions (id, workspace_id, prompt, lang, plan, weak_topics)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
         """,
         uuid.UUID(session_id),
         uuid.UUID(body.workspace_id),
         body.prompt,
         body.lang,
         json.dumps(plan, ensure_ascii=False) if plan else None,
+        json.dumps(body.weak_topics, ensure_ascii=False) if body.weak_topics else None,
     )
 
     context, used_material = await _lesson_context(body.workspace_id, body.prompt)
@@ -502,6 +505,7 @@ async def lesson_start(body: LessonStartRequest):
             topic=body.prompt,
             plan=plan,
             level=body.level,
+            weak_topics=body.weak_topics,
         ):
             yield event
 
@@ -979,6 +983,7 @@ async def roadmap(body: RoadmapRequest):
         stages=result["stages"],
         total_weeks=total_weeks,
         deadline=deadline,
+        weak_topics=body.weak_topics,
     )
 
 
