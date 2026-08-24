@@ -47,7 +47,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: bo
     >
       <div className="flex items-start justify-between px-6 pt-8 pb-6 border-b border-border">
         <div>
-          <span className="font-mono text-lg font-semibold tracking-tight flex items-center gap-2"><img src="/icon.svg" alt="" className="h-6 w-6" />immergo</span>
+          <Link href="/" className="font-mono text-lg font-semibold tracking-tight flex items-center gap-2 hover:opacity-80 transition-opacity"><img src="/icon.svg" alt="" className="h-6 w-6" />immergo</Link>
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted mt-0.5">
             [ INSTITUTIONAL ]
           </div>

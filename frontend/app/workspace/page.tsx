@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
@@ -1450,10 +1451,10 @@ function WorkspaceInner() {
     <div className="flex flex-col h-dvh w-full bg-board">
       {/* Header */}
       <header className="flex items-center justify-between gap-2 px-3 sm:px-5 py-3 border-b border-border shrink-0">
-        <div className="flex items-center gap-2 w-28 sm:w-40 shrink-0">
+        <Link href="/" className="flex items-center gap-2 w-28 sm:w-40 shrink-0 hover:opacity-80 transition-opacity">
           <img src="/icon.svg" alt="" className="h-5 w-5" />
           <span className="font-semibold text-lg tracking-tight">immergo</span>
-        </div>
+        </Link>
         <div className="flex items-center justify-center gap-2 text-sm text-muted min-w-0">
           {difficulty.c + difficulty.w > 0 && (
             <span
