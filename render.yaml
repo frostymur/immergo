@@ -4,8 +4,8 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
-    rootDir: backend
-    dockerfilePath: backend/Dockerfile
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     healthCheckPath: /api/health
     envVars:
       - key: PORT
