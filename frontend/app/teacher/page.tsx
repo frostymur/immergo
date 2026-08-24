@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
-import { fetchHeatmap, uploadPdf } from "@/lib/api";
+import { fetchClassAnalytics, fetchHeatmap, uploadPdf, type ClassAnalytics, type StudentReadiness } from "@/lib/api";
 import UserAvatar from "@/components/UserAvatar";
 import { useUserRole } from "@/lib/useUserRole";
-import { Upload, FileText, Loader2, Plus, Link2, X, Check, ClipboardList, CalendarDays } from "lucide-react";
+import { Upload, FileText, Loader2, Plus, Link2, X, Check, ClipboardList, CalendarDays, TrendingUp, TrendingDown, Users } from "lucide-react";
 
 type Workspace = { id: string; title: string; subject: string; grade: string };
 type HeatmapNode = {
@@ -42,6 +42,9 @@ export default function TeacherPage() {
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapNode[]>([]);
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [analytics, setAnalytics] = useState<ClassAnalytics | null>(null);
+  const [expandedStudent, setExpandedStudent] = useState<string | null>(null);
+  const [subject, setSubject] = useState<string | null>(null);
   const [sources, setSources] = useState<{ id: string; file_name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -131,17 +134,39 @@ export default function TeacherPage() {
     })();
   }, [selectedWs, supabase]);
 
+  // Class analytics, scoped to the selected subject. When the class only has
+  // diagnostics in one subject it is auto-selected, so a single-subject class
+  // shows the per-subject statistics without an extra click. A subject that
+  // does not exist in the newly selected class is dropped.
+  useEffect(() => {
+    if (!selectedWs) return;
+    fetchClassAnalytics(selectedWs, subject)
+      .then((data) => {
+        setAnalytics(data);
+        if (subject && !data.subjects.includes(subject)) setSubject(null);
+        else if (!subject && data.subjects.length === 1) setSubject(data.subjects[0]);
+      })
+      .catch(() => setAnalytics(null));
+  }, [selectedWs, subject]);
+
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClass.title) return;
     setCreating(true);
     setError("");
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      setError("Not signed in");
+      setCreating(false);
+      return;
+    }
     const { data, error: err } = await supabase
       .from("workspaces")
       .insert({
         title: newClass.title,
         subject: newClass.subject || "General",
         grade: newClass.grade || "",
+        user_id: userData.user.id,
       })
       .select("id, title, subject, grade")
       .single();
@@ -255,6 +280,55 @@ export default function TeacherPage() {
     if (i > 0.1) return "bg-yellow-100 border-yellow-300 text-yellow-900";
     return "bg-green-100 border-green-300 text-green-900";
   };
+
+  const readinessChip = (r: StudentReadiness["readiness"]) => {
+    switch (r) {
+      case "ready":
+        return "bg-green-100 border-green-300 text-green-800";
+      case "on_track":
+        return "bg-yellow-100 border-yellow-300 text-yellow-800";
+      case "at_risk":
+        return "bg-red-100 border-red-300 text-red-800";
+      default:
+        return "bg-surface border-border text-muted";
+    }
+  };
+
+  const readinessLabel = (r: StudentReadiness["readiness"]) =>
+    r === "ready"
+      ? t("teacher.ready")
+      : r === "on_track"
+        ? t("teacher.onTrack")
+        : r === "at_risk"
+          ? t("teacher.atRisk")
+          : t("teacher.noData");
+
+  const topicBar = (pct: number) => (pct >= 75 ? "bg-green-500" : pct >= 45 ? "bg-yellow-500" : "bg-red-500");
+
+  // Trend between the two latest diagnostic attempts (null = only one test).
+  const diagTrend = (s: StudentReadiness) => {
+    if (s.diagnostics.length < 2) return null;
+    return (s.diagnostics[0].pct ?? 0) - (s.diagnostics[1].pct ?? 0);
+  };
+
+  // Class-level numbers for the current subject scope (or the whole class).
+  const scope = analytics?.students ?? [];
+  const taken = scope.filter((s) => s.pct !== null);
+  const classAvg = taken.length
+    ? Math.round(taken.reduce((a, s) => a + (s.pct ?? 0), 0) / taken.length)
+    : null;
+  const readyCount = scope.filter((s) => s.readiness === "ready").length;
+  const onTrackCount = scope.filter((s) => s.readiness === "on_track").length;
+  const atRiskCount = scope.filter((s) => s.readiness === "at_risk").length;
+  const withRoadmap = scope.filter((s) => s.roadmap_total > 0);
+  const roadmapAvg = withRoadmap.length
+    ? Math.round(
+        withRoadmap.reduce((a, s) => a + (100 * s.roadmap_done / s.roadmap_total), 0) /
+          withRoadmap.length
+      )
+    : null;
+  const hwDone = scope.reduce((a, s) => a + s.assignments_done, 0);
+  const hwTotal = scope.reduce((a, s) => a + s.assignments_total, 0);
 
   const totalAttempts = members.reduce((a, s) => a + s.completed + s.failed, 0);
   const totalCompleted = members.reduce((a, s) => a + s.completed, 0);
@@ -405,35 +479,224 @@ export default function TeacherPage() {
             </div>
           </div>
 
-          {/* Roster */}
+          {/* Class insights — struggling topics + per-student readiness */}
           <div className="border border-border bg-surface overflow-hidden">
-            <div className="px-4 py-3 border-b border-border font-mono text-[10px] uppercase tracking-widest text-muted">
-              [ CLASS_ROSTER ]
-            </div>
-            {members.length === 0 ? (
-              <div className="p-4 text-sm text-muted">{t("teacher.noStudents")}</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-muted border-b border-border font-mono uppercase tracking-wider">
-                    <th className="px-4 py-2.5 font-medium">{t("teacher.studentCol")}</th>
-                    <th className="px-4 py-2.5 font-medium">{t("teacher.completedCol")}</th>
-                    <th className="px-4 py-2.5 font-medium">{t("teacher.failedCol")}</th>
-                    <th className="px-4 py-2.5 font-medium">{t("teacher.errorsCol")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {members.map((s, i) => (
-                    <tr key={i}>
-                      <td className="px-4 py-2.5 font-medium">{s.email || s.student_id.slice(0, 8)}</td>
-                      <td className="px-4 py-2.5 text-green-700">{s.completed}</td>
-                      <td className="px-4 py-2.5 text-red-600">{s.failed}</td>
-                      <td className="px-4 py-2.5 text-muted">{s.errors}</td>
-                    </tr>
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
+                [ {t("teacher.insights")} ]
+              </span>
+              {analytics && analytics.subjects.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.bySubject")}
+                  </span>
+                  {analytics.subjects.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setSubject(subject === s ? null : s)}
+                      className={`px-2.5 py-1 text-xs font-medium border transition-colors ${
+                        subject === s
+                          ? "bg-primary text-foreground border-primary"
+                          : "border-border text-muted hover:border-primary hover:text-foreground"
+                      }`}
+                    >
+                      {s}
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
+            </div>
+            {subject && analytics && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-px bg-border border-b border-border">
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.avgScore")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5">
+                    {classAvg === null ? "—" : `${classAvg}%`}
+                  </div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.coverage")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5">
+                    {taken.length}/{scope.length}
+                  </div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.roadmapAvg")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5">
+                    {roadmapAvg === null ? "—" : `${roadmapAvg}%`}
+                  </div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.hw")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5">
+                    {hwTotal > 0 ? `${hwDone}/${hwTotal}` : "—"}
+                  </div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.ready")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5 text-green-600">{readyCount}</div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.onTrack")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5 text-yellow-600">{onTrackCount}</div>
+                </div>
+                <div className="bg-surface p-3">
+                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">
+                    {t("teacher.atRisk")}
+                  </div>
+                  <div className="text-xl font-semibold mt-0.5 text-red-600">{atRiskCount}</div>
+                </div>
+              </div>
             )}
+            <div className="grid grid-cols-1 lg:grid-cols-2">
+              <div className="p-4 border-b lg:border-b-0 lg:border-r border-border">
+                <div className="flex items-center gap-2 mb-3">
+                  <TrendingUp size={14} className="text-red-500" />
+                  <span className="text-sm font-medium">{t("teacher.struggling")}</span>
+                </div>
+                {analytics && analytics.topics.length > 0 ? (
+                  <div className="space-y-3">
+                    {analytics.topics.slice(0, 8).map((topic) => (
+                      <div key={topic.topic}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-sm truncate">{topic.topic}</span>
+                          <button
+                            onClick={() => {
+                              setNewAssign((prev) => ({ ...prev, topic: topic.topic }));
+                              setShowAssign(true);
+                            }}
+                            className="flex items-center gap-1 text-[11px] font-medium border border-primary/40 text-primary px-2 py-0.5 hover:bg-primary/10 transition-colors flex-shrink-0"
+                          >
+                            <Plus size={10} /> {t("teacher.assignFor")}
+                          </button>
+                        </div>
+                        <div className="h-1.5 bg-border rounded overflow-hidden">
+                          <div
+                            className={`h-full rounded ${topicBar(topic.pct)}`}
+                            style={{ width: `${Math.max(4, topic.pct)}%` }}
+                          />
+                        </div>
+                        <div className="font-mono text-[10px] text-muted mt-1">
+                          {topic.correct}/{topic.total} · {topic.pct}% {t("teacher.masteryPct")} · {topic.students} {t("teacher.studentsShort")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">{t("teacher.noTopics")}</p>
+                )}
+              </div>
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Users size={14} className="text-primary" />
+                  <span className="text-sm font-medium">{t("teacher.readiness")}</span>
+                </div>
+                {analytics && analytics.students.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {analytics.students.map((s) => {
+                      const delta = diagTrend(s);
+                      const expanded = expandedStudent === s.user_id;
+                      return (
+                        <div key={s.user_id}>
+                          <button
+                            onClick={() => setExpandedStudent(expanded ? null : s.user_id)}
+                            className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-surface transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium truncate">
+                                {s.email || s.user_id.slice(0, 8)}
+                                {s.diagnostics.length > 1 && (
+                                  <span className="ml-2 font-mono text-[9px] uppercase text-muted border border-border px-1.5 py-0.5">
+                                    {s.diagnostics.length}×
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-mono text-[10px] text-muted truncate">
+                                {s.correct !== null && s.total ? `${s.correct}/${s.total} · ` : ""}
+                                {s.roadmap_total > 0 ? `RM ${s.roadmap_done}/${s.roadmap_total} · ` : ""}
+                                HW {s.assignments_done}/{s.assignments_total} · {s.completed}✓ {s.failed}✗
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {delta !== null && delta !== 0 && (
+                                <span
+                                  className={`flex items-center gap-0.5 font-mono text-[10px] ${delta > 0 ? "text-green-600" : "text-red-600"}`}
+                                  title={t("teacher.trendTitle")}
+                                >
+                                  {delta > 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                                  {Math.abs(delta)}%
+                                </span>
+                              )}
+                              <span
+                                title={
+                                  s.readiness_score !== null
+                                    ? `${t("teacher.scoreTitle")} (${s.readiness_score})`
+                                    : t("teacher.scoreTitle")
+                                }
+                                className={`text-[11px] font-medium border px-2 py-0.5 ${readinessChip(s.readiness)}`}
+                              >
+                                {readinessLabel(s.readiness)}
+                              </span>
+                            </div>
+                          </button>
+                          {expanded && s.diagnostics.length > 0 && (
+                            <div className="pb-2.5 -mt-1">
+                              <div className="font-mono text-[9px] uppercase tracking-widest text-muted mb-1.5 pl-1">
+                                [ {t("teacher.history")} ]
+                              </div>
+                              <div className="space-y-1">
+                                {s.diagnostics.map((d, i) => (
+                                  <div key={i} className="flex items-center gap-2 pl-1 font-mono text-[10px] text-muted">
+                                    <span className="flex-shrink-0">
+                                      {new Date(d.created_at).toLocaleDateString()}
+                                    </span>
+                                    <span className="truncate">{d.subject}</span>
+                                    <span className="ml-auto flex-shrink-0">
+                                      {d.correct}/{d.total} ({d.pct}%)
+                                    </span>
+                                    <span className="flex-shrink-0">{d.level}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : members.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {members.map((s) => (
+                      <div key={s.student_id} className="flex items-center justify-between gap-3 py-2.5">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{s.email || s.student_id.slice(0, 8)}</div>
+                          <div className="font-mono text-[10px] text-muted">
+                            {s.completed}✓ {s.failed}✗
+                          </div>
+                        </div>
+                        <span className="flex-shrink-0 text-[11px] font-medium border border-border px-2 py-0.5 text-muted">
+                          {t("teacher.noData")}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">{t("teacher.noStudents")}</p>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Assignments */}

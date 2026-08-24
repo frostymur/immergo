@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Award, BellRing, BookOpen, CheckCircle2, Flame, Target, TrendingUp, XCircle, ArrowRight, Zap } from "lucide-react";
+import { Award, BellRing, BookOpen, CalendarClock, CheckCircle2, Flame, Highlighter, RotateCcw, Target, TrendingUp, XCircle, ArrowRight, Zap } from "lucide-react";
 import { useLocale, type Locale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
+import { fetchHighlights, type Highlight } from "@/lib/api";
 
 const I18N: Record<Locale, Record<string, string>> = {
   kz: {
@@ -44,6 +45,23 @@ const I18N: Record<Locale, Record<string, string>> = {
     start: "Бастау",
     entCountdown: "ЕНТ-ге дейін",
     daysLeftShort: "күн",
+    reminders: "Еске салулар",
+    upcomingHint: "соңғы 48 сағат",
+    dueTag: "Мерзім",
+    reviewTag: "Қайталау",
+    overdue: "мерзімі өтті",
+    inHours: "{n} сағ қалды",
+    inDays: "{n} күн қалды",
+    afterFails: "{n} қателіктен кейін",
+    reviewNow: "Қайталау",
+    openAssign: "Ашу",
+    planDeadline: "жоспар мерзімі",
+    allClear: "Барлығы ретте — ештеңе мерзімінен өтпеген",
+    badgeStreak3: "Стрик: 3 күн",
+    badgePerfect: "Нақты диагностика",
+    badgeAccuracy90: "Дәлдік 90%+",
+    badgePlanHalf: "Жоспардың 50%",
+    nextLevel: "{name} деңгейіне дейін",
   },
   ru: {
     title: "Мой кабинет",
@@ -81,6 +99,23 @@ const I18N: Record<Locale, Record<string, string>> = {
     start: "Начать",
     entCountdown: "До ЕНТ осталось",
     daysLeftShort: "дней",
+    reminders: "Напоминания",
+    upcomingHint: "ближайшие 48 ч",
+    dueTag: "Срок",
+    reviewTag: "Повторение",
+    overdue: "просрочено",
+    inHours: "через {n} ч",
+    inDays: "через {n} дн",
+    afterFails: "после {n} ошибок",
+    reviewNow: "Повторить",
+    openAssign: "Открыть",
+    planDeadline: "дедлайн плана",
+    allClear: "Всё в порядке — ничего не просрочено",
+    badgeStreak3: "Стрик: 3 дня",
+    badgePerfect: "Идеальная диагностика",
+    badgeAccuracy90: "Точность 90%+",
+    badgePlanHalf: "План на 50%",
+    nextLevel: "до уровня {name}",
   },
   en: {
     title: "My Cabinet",
@@ -118,11 +153,28 @@ const I18N: Record<Locale, Record<string, string>> = {
     start: "Start",
     entCountdown: "Days until UNT",
     daysLeftShort: "days",
+    reminders: "Reminders",
+    upcomingHint: "next 48 h",
+    dueTag: "Deadline",
+    reviewTag: "Review",
+    overdue: "overdue",
+    inHours: "in {n} h",
+    inDays: "in {n} d",
+    afterFails: "after {n} mistakes",
+    reviewNow: "Review",
+    openAssign: "Open",
+    planDeadline: "plan deadline",
+    allClear: "All clear — nothing is overdue",
+    badgeStreak3: "3-day streak",
+    badgePerfect: "Perfect diagnostic",
+    badgeAccuracy90: "90%+ accuracy",
+    badgePlanHalf: "Plan 50% done",
+    nextLevel: "to {name}",
   },
 };
 
 type WeakNode = { node_id: string; errors: number; attempts: number };
-type PlanRow = { id: string; topic: string; goal: string; total_weeks: number; deadline: string | null; stages: unknown[] };
+type PlanRow = { id: string; topic: string; goal: string; level: string; total_weeks: number; deadline: string | null; stages: unknown[] };
 type DoneRow = { plan_id: string; count: number };
 type AssignmentRow = { id: string; workspace_id: string; title: string; topic: string; deadline: string | null };
 
@@ -230,6 +282,28 @@ function ActivityCalendar({
   );
 }
 
+/** Animates a number from its previous value to the target (ease-out). */
+function useCountUp(target: number, duration = 800): number {
+  const [val, setVal] = useState(target);
+  const prevRef = useRef(target);
+  useEffect(() => {
+    const from = prevRef.current;
+    prevRef.current = target;
+    if (from === target) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setVal(Math.round(from + (target - from) * eased));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return val;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { locale } = useLocale();
@@ -251,9 +325,18 @@ export default function DashboardPage() {
   const [plan, setPlan] = useState<PlanRow | null>(null);
   const [planDoneCount, setPlanDoneCount] = useState(0);
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
+  const [urgentAssignments, setUrgentAssignments] = useState<AssignmentRow[]>([]);
+  const [reviewQueue, setReviewQueue] = useState<{ node_id: string; fail_count: number; next_review_at: string }[]>([]);
+  const [nowMs] = useState(() => Date.now());
 
   const [activeDates, setActiveDates] = useState<Map<string, number>>(new Map());
   const [streak, setStreak] = useState({ current: 0, max: 0, total: 0 });
+
+  // Highlights from recent lesson sessions
+  const [recentHighlights, setRecentHighlights] = useState<
+    { session_id: string; prompt: string; highlights: Highlight[] }[]
+  >([]);
+  const [highlightsLoading, setHighlightsLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -346,7 +429,7 @@ export default function DashboardPage() {
 
       const { data: plans } = await supabase
         .from("roadmap_plans")
-        .select("id, topic, goal, total_weeks, deadline, stages, created_at")
+        .select("id, topic, goal, level, total_weeks, deadline, stages, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(1);
@@ -396,10 +479,50 @@ export default function DashboardPage() {
             (!a.deadline || new Date(a.deadline).getTime() > Date.now())
         );
         setAssignments(active.slice(0, 2));
+        // Anything not done that has a deadline feeds the reminder panel
+        // (overdue items included — the panel filters by urgency).
+        setUrgentAssignments(
+          rows.filter((a) => a.deadline && (statusByAssign.get(a.id) || "assigned") !== "done")
+        );
       }
+
+      // Spaced-repetition queue: topics due now or within the next 48 h.
+      const { data: review } = await supabase
+        .from("review_schedule")
+        .select("node_id, fail_count, next_review_at")
+        .eq("user_id", userId)
+        .lte("next_review_at", new Date(Date.now() + 48 * 3600000).toISOString());
+      setReviewQueue(review || []);
+
       setLoading(false);
     })();
   }, [router, supabase]);
+
+  // Load highlights from recent lesson sessions separately
+  useEffect(() => {
+    if (!authed) return;
+    (async () => {
+      setHighlightsLoading(true);
+      try {
+        const { data: sessions } = await supabase
+          .from("lesson_sessions")
+          .select("id, prompt")
+          .order("created_at", { ascending: false })
+          .limit(10);
+        if (!sessions || sessions.length === 0) return;
+        const results: { session_id: string; prompt: string; highlights: Highlight[] }[] = [];
+        for (const s of sessions) {
+          try {
+            const hs = await fetchHighlights(s.id);
+            if (hs.length > 0) results.push({ session_id: s.id, prompt: s.prompt, highlights: hs });
+          } catch { /* skip */ }
+        }
+        setRecentHighlights(results);
+      } catch { /* ignore */ } finally {
+        setHighlightsLoading(false);
+      }
+    })();
+  }, [authed, supabase]);
 
   const xp = stats.completed * 5 + stats.diagnostics * 25 + stats.plans * 40 + planDoneCount * 20;
   const accuracy =
@@ -407,18 +530,100 @@ export default function DashboardPage() {
       ? Math.round((stats.completed / (stats.completed + stats.failed)) * 100)
       : null;
 
+  const daysLeft = plan?.deadline ? Math.max(0, Math.ceil((new Date(plan.deadline).getTime() - nowMs) / 86400000)) : null;
+  const planPct = plan ? Math.min(100, Math.round((planDoneCount / plan.stages.length) * 100)) : 0;
+
+  const LEVELS = [
+    { min: 0, name: "Beginner" },
+    { min: 80, name: "Learner" },
+    { min: 250, name: "Achiever" },
+    { min: 600, name: "Master" },
+  ];
+  const levelIdx = LEVELS.reduce((acc, l, i) => (xp >= l.min ? i : acc), 0);
+  const levelName = LEVELS[levelIdx].name;
+  const nextLevel = LEVELS[levelIdx + 1] || null;
+  const levelProgress = nextLevel
+    ? Math.min(100, Math.round(((xp - LEVELS[levelIdx].min) / (nextLevel.min - LEVELS[levelIdx].min)) * 100))
+    : 100;
+
+  const xpShown = useCountUp(xp);
+  const streakShown = useCountUp(streak.current);
+
   const badges: { id: string; label: string; done: boolean }[] = [
     { id: "diag", label: t.badgeDiagnostic, done: stats.diagnostics > 0 },
     { id: "tasks", label: t.badgeTasks, done: stats.completed >= 10 },
     { id: "acc", label: t.badgeAccurate, done: accuracy !== null && accuracy >= 80 && stats.completed + stats.failed >= 5 },
     { id: "plan", label: t.badgePlan, done: stats.plans > 0 },
     { id: "planDone", label: t.badgePlanDone, done: planDoneCount > 0 && planDoneCount >= stats.planStagesTotal && stats.planStagesTotal > 0 },
+    { id: "streak3", label: t.badgeStreak3, done: streak.current >= 3 },
+    { id: "perfect", label: t.badgePerfect, done: !!lastDiagnostic && lastDiagnostic.total > 0 && lastDiagnostic.correct === lastDiagnostic.total },
+    { id: "acc90", label: t.badgeAccuracy90, done: accuracy !== null && accuracy >= 90 && stats.completed + stats.failed >= 10 },
+    { id: "planHalf", label: t.badgePlanHalf, done: planPct >= 50 },
   ];
   const badgesOpen = badges.filter((b) => b.done).length;
-  const levelName = xp >= 600 ? "Master" : xp >= 250 ? "Achiever" : xp >= 80 ? "Learner" : "Beginner";
 
-  const daysLeft = plan?.deadline ? Math.max(0, Math.ceil((new Date(plan.deadline).getTime() - Date.now()) / 86400000)) : null;
-  const planPct = plan ? Math.min(100, Math.round((planDoneCount / plan.stages.length) * 100)) : 0;
+  // Reminder panel: deadline items (assignments, study plan) and
+  // spaced-repetition reviews, most urgent first.
+  type Reminder = {
+    kind: "due" | "review";
+    key: string;
+    title: string;
+    sub: string;
+    when: number;
+    cta: string;
+    ctaLabel: string;
+  };
+  const nodeTitle = (id: string) => {
+    const s = id.replace(/^lesson:/, "").replace(/-/g, " ").trim();
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  };
+  const reminders: Reminder[] = [];
+  for (const a of urgentAssignments) {
+    if (!a.deadline) continue;
+    const when = new Date(a.deadline).getTime();
+    if (when - nowMs > 48 * 3600000) continue; // only overdue or within 48 h
+    reminders.push({
+      kind: "due",
+      key: a.id,
+      title: a.title,
+      sub: a.topic,
+      when,
+      cta: `/workspace?workspace_id=${a.workspace_id}&assignment=${a.id}`,
+      ctaLabel: t.openAssign,
+    });
+  }
+  if (plan && plan.deadline && daysLeft !== null && daysLeft <= 14) {
+    reminders.push({
+      kind: "due",
+      key: "roadmap",
+      title: `${plan.topic} · ${plan.goal.toUpperCase()}`,
+      sub: t.planDeadline,
+      when: new Date(plan.deadline).getTime(),
+      cta: `/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}`,
+      ctaLabel: t.startPlan,
+    });
+  }
+  for (const r of reviewQueue) {
+    const title = nodeTitle(r.node_id);
+    reminders.push({
+      kind: "review",
+      key: r.node_id,
+      title,
+      sub: t.afterFails.replace("{n}", String(r.fail_count)),
+      when: new Date(r.next_review_at).getTime(),
+      cta: `/workspace?topic=${encodeURIComponent(title)}`,
+      ctaLabel: t.reviewNow,
+    });
+  }
+  reminders.sort((a, b) => a.when - b.when);
+
+  const fmtWhen = (when: number) => {
+    const diff = when - nowMs;
+    if (diff < 0) return { text: t.overdue, urgent: true };
+    const h = Math.max(1, Math.round(diff / 3600000));
+    if (h < 48) return { text: t.inHours.replace("{n}", String(h)), urgent: h < 24 };
+    return { text: t.inDays.replace("{n}", String(Math.round(diff / 86400000))), urgent: false };
+  };
 
   if (!authed) return null;
 
@@ -471,6 +676,60 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* Reminders: upcoming deadlines + spaced-repetition reviews */}
+          <div className="bg-surface border border-border p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+                <BellRing size={12} /> {t.reminders}
+              </div>
+              {reminders.length > 0 && (
+                <span className="font-mono text-[9px] uppercase tracking-widest text-muted">{t.upcomingHint}</span>
+              )}
+            </div>
+            {reminders.length === 0 ? (
+              <p className="text-sm text-muted">{t.allClear}</p>
+            ) : (
+              <div className="space-y-2">
+                {reminders.map((r) => {
+                  const w = fmtWhen(r.when);
+                  return (
+                    <div key={r.key} className="flex items-center gap-3 flex-wrap border border-border p-3">
+                      <div
+                        className={`w-9 h-9 flex items-center justify-center flex-shrink-0 border ${
+                          w.urgent ? "bg-red-50 text-red-600 border-red-200" : "bg-primary/10 text-primary border-primary/20"
+                        }`}
+                      >
+                        {r.kind === "review" ? <RotateCcw size={15} /> : <CalendarClock size={15} />}
+                      </div>
+                      <div className="min-w-0 flex-1 basis-40">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`font-mono text-[9px] uppercase tracking-widest border px-1.5 py-0.5 ${
+                              w.urgent ? "border-red-300 text-red-600" : "border-border text-muted"
+                            }`}
+                          >
+                            {r.kind === "review" ? t.reviewTag : t.dueTag}
+                          </span>
+                          <span className="text-sm font-medium text-foreground truncate">{r.title}</span>
+                        </div>
+                        <div className="text-xs text-muted truncate mt-0.5">{r.sub}</div>
+                      </div>
+                      <span className={`font-mono text-[10px] uppercase tracking-wider flex-shrink-0 ${w.urgent ? "text-red-600" : "text-muted"}`}>
+                        {w.text}
+                      </span>
+                      <Link
+                        href={r.cta}
+                        className="flex items-center gap-1.5 h-9 px-3.5 bg-primary hover:bg-primary-hover text-foreground text-xs font-medium transition-colors flex-shrink-0"
+                      >
+                        {r.ctaLabel} <ArrowRight size={12} />
+                      </Link>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Goal countdown widget */}
           {plan && plan.goal === "ent" && daysLeft !== null && (
             <div className="bg-surface border border-primary/40 p-5 flex flex-wrap items-center gap-4">
@@ -494,10 +753,10 @@ export default function DashboardPage() {
           <div className="bg-surface border border-border p-5 flex flex-wrap items-center gap-6">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
-                <Flame size={22} className="text-orange-500" />
+                <Flame size={22} className={`text-orange-500 ${streak.current > 0 ? "animate-flame-pulse" : ""}`} />
               </div>
               <div>
-                <div className="text-2xl font-semibold text-foreground">{streak.current}</div>
+                <div className="text-2xl font-semibold text-foreground">{streakShown}</div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted">{t.streakLabel}</div>
               </div>
             </div>
@@ -506,9 +765,18 @@ export default function DashboardPage() {
               <div className="w-14 h-14 bg-primary/10 border border-primary/30 flex items-center justify-center hidden sm:flex">
                 <Zap size={22} className="text-primary" />
               </div>
-              <div>
-                <div className="text-2xl font-semibold text-foreground">{xp}</div>
+              <div className="min-w-0">
+                <div className="text-2xl font-semibold text-foreground">{xpShown}</div>
                 <div className="font-mono text-[10px] uppercase tracking-widest text-muted">{t.totalXp}</div>
+                <div
+                  className="mt-1.5 h-1 w-28 sm:w-36 bg-border overflow-hidden"
+                  title={nextLevel ? `${xpShown}/${nextLevel.min} XP` : "MAX LEVEL"}
+                >
+                  <div className="h-full bg-primary transition-all duration-700" style={{ width: `${levelProgress}%` }} />
+                </div>
+                <div className="font-mono text-[8px] uppercase tracking-wider text-muted mt-1">
+                  {nextLevel ? t.nextLevel.replace("{name}", nextLevel.name) : "MAX LEVEL"}
+                </div>
               </div>
             </div>
             <div className="h-10 w-px bg-border hidden sm:block" />
@@ -595,7 +863,7 @@ export default function DashboardPage() {
                 </div>
               </div>
               <Link
-                href={`/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}`}
+                href={`/roadmap?topic=${encodeURIComponent(plan.topic)}&goal=${plan.goal}&level=${plan.level || "intermediate"}`}
                 className="flex items-center gap-2 text-sm text-primary hover:underline"
               >
                 {t.startPlan} <ArrowRight size={13} />
@@ -639,8 +907,56 @@ export default function DashboardPage() {
             )}
           </div>
 
+          {/* Highlights from recent lessons */}
+          <div className="bg-surface border border-border p-5 space-y-3">
+            <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+              <Highlighter size={12} /> Saved Highlights
+            </div>
+            {highlightsLoading ? (
+              <p className="text-xs text-muted">Loading highlights…</p>
+            ) : recentHighlights.length === 0 ? (
+              <p className="text-xs text-muted leading-relaxed">
+                No highlights yet. During a lesson, toggle the 🖊 highlighter in the toolbar, select text, and pick a color to save it here.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {recentHighlights.map(({ session_id, prompt, highlights }) => (
+                  <div key={session_id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-foreground truncate">{prompt}</span>
+                      <Link
+                        href={`/workspace?lesson=${session_id}`}
+                        className="shrink-0 text-[10px] font-mono text-primary hover:underline"
+                      >
+                        Open lesson →
+                      </Link>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {highlights.map((h) => (
+                        <span
+                          key={h.id}
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor:
+                              h.color === "yellow" ? "#fef08a" :
+                              h.color === "green" ? "#bbf7d0" :
+                              h.color === "blue" ? "#bfdbfe" : "#fbcfe8",
+                            color: "#1a1a1a",
+                          }}
+                          title={`Block #${h.block_idx}`}
+                        >
+                          {h.selected_text.length > 60 ? h.selected_text.slice(0, 60) + "…" : h.selected_text}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Badges */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
             {badges.map((b) => (
               <div
                 key={b.id}

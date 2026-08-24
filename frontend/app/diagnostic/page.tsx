@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Loader2, Target, BarChart3, GraduationCap, Award
 import { useLocale, type Locale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
 import { apiDiagnosticEvaluate, apiDiagnosticStart, type DiagnosticQuestion, type DiagnosticResult, type Goal } from "@/lib/api";
+import Confetti from "@/components/Confetti";
 
 type Dict = {
   tag: string;
@@ -30,6 +31,12 @@ type Dict = {
   roadmap: string;
   lesson: string;
   again: string;
+  review: string;
+  yourAnswer: string;
+  correctLabel: string;
+  wrongLabel: string;
+  demoNote: string;
+  perfect: string;
 };
 
 const I18N: Record<Locale, Dict> = {
@@ -60,6 +67,12 @@ const I18N: Record<Locale, Dict> = {
     roadmap: "Дайындық жоспарын ашу",
     lesson: "Сабақты бастау",
     again: "Қайта тапсыру",
+    review: "Жауаптарды талдау",
+    yourAnswer: "Сіздің жауабыңыз",
+    correctLabel: "Дұрыс",
+    wrongLabel: "Қате",
+    demoNote: "Демо-версия: 12 сынып · Физика · ЕНТ",
+    perfect: "Нақты! Барлық дұрыс",
   },
   ru: {
     tag: "DIAGNOSTIC",
@@ -88,6 +101,12 @@ const I18N: Record<Locale, Dict> = {
     roadmap: "Открыть план подготовки",
     lesson: "Начать урок",
     again: "Пройти снова",
+    review: "Разбор ответов",
+    yourAnswer: "Ваш ответ",
+    correctLabel: "Правильно",
+    wrongLabel: "Неверно",
+    demoNote: "Демо-версия: 12 класс · Физика · ЕНТ",
+    perfect: "Идеально! Все ответы верны",
   },
   en: {
     tag: "DIAGNOSTIC",
@@ -116,13 +135,59 @@ const I18N: Record<Locale, Dict> = {
     roadmap: "Open study plan",
     lesson: "Start lesson",
     again: "Retake test",
+    review: "Answer review",
+    yourAnswer: "Your answer",
+    correctLabel: "Correct",
+    wrongLabel: "Incorrect",
+    demoNote: "Demo: Grade 12 · Physics · UNT",
+    perfect: "Perfect! Every answer correct",
   },
 };
+
+/** Animated score ring — sweeps from 0 to the final percentage on mount. */
+function ScoreRing({ correct, total }: { correct: number; total: number }) {
+  const pct = Math.round((correct / Math.max(1, total)) * 100);
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setShown(pct));
+    return () => cancelAnimationFrame(id);
+  }, [pct]);
+  const R = 52;
+  const C = 2 * Math.PI * R;
+  const tone = pct >= 75 ? "stroke-green-500" : pct >= 45 ? "stroke-primary" : "stroke-red-400";
+  return (
+    <div className="relative w-28 h-28 shrink-0">
+      <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
+        <circle cx="60" cy="60" r={R} className="stroke-border" strokeWidth="9" fill="none" />
+        <circle
+          cx="60"
+          cy="60"
+          r={R}
+          className={tone}
+          strokeWidth="9"
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={C * (1 - shown / 100)}
+          style={{ transition: "stroke-dashoffset 900ms cubic-bezier(0.22, 1, 0.36, 1)" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-2xl font-semibold text-foreground">
+          {correct}
+          <span className="text-base text-muted">/{total}</span>
+        </span>
+        <span className="font-mono text-[9px] uppercase tracking-widest text-muted">{pct}%</span>
+      </div>
+    </div>
+  );
+}
 
 async function loadDemoQuestions(lang: Locale): Promise<DiagnosticQuestion[]> {
   const res = await fetch(`/demo/diagnostic-${lang}.json`);
   if (!res.ok) throw new Error("no demo data");
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : data.questions || [];
 }
 
 export default function DiagnosticPage() {
@@ -131,9 +196,11 @@ export default function DiagnosticPage() {
   const t = I18N[locale];
 
   const [step, setStep] = useState<"setup" | "test" | "result">("setup");
-  const [grade, setGrade] = useState(9);
-  const [subject, setSubject] = useState("");
-  const [goal, setGoal] = useState<Goal>("ent");
+  // Demo build: the diagnostic is locked to one configuration —
+  // 12-й класс, Физика, цель ЕНТ. Other configs stay placeholders.
+  const grade = 12;
+  const demoSubject = t.subjects[1];
+  const goal: Goal = "ent";
 
   const [questions, setQuestions] = useState<DiagnosticQuestion[]>([]);
   const [answers, setAnswers] = useState<number[]>([]);
@@ -141,16 +208,13 @@ export default function DiagnosticPage() {
   const [error, setError] = useState("");
 
   const [result, setResult] = useState<DiagnosticResult | null>(null);
+  const [celebrate, setCelebrate] = useState(0);
 
   const startTest = async () => {
-    if (!subject) {
-      setError(t.subjects.length ? "choose" : "");
-      return;
-    }
     setLoading(true);
     setError("");
     try {
-      const data = await apiDiagnosticStart(grade, subject, goal, locale);
+      const data = await apiDiagnosticStart(grade, demoSubject, goal, locale);
       setQuestions(data.questions);
       setAnswers(new Array(data.questions.length).fill(-1));
       setStep("test");
@@ -173,7 +237,7 @@ export default function DiagnosticPage() {
     setError("");
     let final: DiagnosticResult;
     try {
-      final = await apiDiagnosticEvaluate(grade, subject, goal, locale, questions, answers);
+      final = await apiDiagnosticEvaluate(grade, demoSubject, goal, locale, questions, answers);
     } catch {
       const correct = questions.reduce((acc, q, i) => (answers[i] === q.answer ? acc + 1 : acc), 0);
       const pct = correct / Math.max(1, questions.length);
@@ -186,19 +250,25 @@ export default function DiagnosticPage() {
           .map((q, i) => (answers[i] === q.answer ? "" : q.topic || q.q))
           .filter(Boolean)
           .slice(0, 6),
-        recommendation: `${subject}: ${locale === "kz" ? "тақырыптың негіздерінен бастаңыз" : locale === "ru" ? "начните с основ темы" : "start with the fundamentals of the topic"}.`,
+        recommendation: `${demoSubject}: ${locale === "kz" ? "тақырыптың негіздерінен бастаңыз" : locale === "ru" ? "начните с основ темы" : "start with the fundamentals of the topic"}.`,
       };
     }
     setResult(final);
     setLoading(false);
     setStep("result");
+    if (final.correct / Math.max(1, final.total) >= 0.4) setCelebrate((c) => c + 1);
 
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     if (userData.user) {
+      // Per-question answers feed the teacher's class-level topic analytics.
+      const answerDetail = questions.map((q, i) => ({
+        topic: q.topic || q.q,
+        correct: answers[i] === q.answer,
+      }));
       await supabase.from("diagnostic_results").insert({
         user_id: userData.user.id,
-        subject,
+        subject: demoSubject,
         grade,
         goal,
         correct: final.correct,
@@ -207,6 +277,7 @@ export default function DiagnosticPage() {
         feedback: final.feedback,
         weak_topics: final.weak_topics,
         recommendation: final.recommendation,
+        answers: answerDetail,
       });
     }
   };
@@ -237,6 +308,9 @@ export default function DiagnosticPage() {
             <div className="space-y-2">
               <h1 className="text-2xl font-semibold text-foreground">{t.title}</h1>
               <p className="text-sm text-muted">{t.subtitle}</p>
+              <p className="text-[11px] font-mono uppercase tracking-wider text-muted border border-border bg-surface inline-block px-2.5 py-1">
+                {t.demoNote}
+              </p>
             </div>
 
             <div className="space-y-3">
@@ -247,11 +321,11 @@ export default function DiagnosticPage() {
                 {Array.from({ length: 12 }, (_, i) => i + 1).map((g) => (
                   <button
                     key={g}
-                    onClick={() => setGrade(g)}
-                    className={`py-2.5 text-sm font-medium border transition-all ${
+                    disabled={g !== grade}
+                    className={`py-2.5 text-sm font-medium border transition-all disabled:cursor-not-allowed ${
                       grade === g
                         ? "bg-primary text-foreground border-primary"
-                        : "bg-surface text-muted border-border hover:border-primary hover:text-foreground"
+                        : "bg-surface text-muted border-border disabled:opacity-40"
                     }`}
                   >
                     {g}
@@ -268,11 +342,11 @@ export default function DiagnosticPage() {
                 {t.subjects.map((s) => (
                   <button
                     key={s}
-                    onClick={() => setSubject(s)}
-                    className={`py-2.5 text-sm font-medium border transition-all ${
-                      subject === s
+                    disabled={s !== demoSubject}
+                    className={`py-2.5 text-sm font-medium border transition-all disabled:cursor-not-allowed ${
+                      demoSubject === s
                         ? "bg-primary text-foreground border-primary"
-                        : "bg-surface text-muted border-border hover:border-primary hover:text-foreground"
+                        : "bg-surface text-muted border-border disabled:opacity-40"
                     }`}
                   >
                     {s}
@@ -289,11 +363,11 @@ export default function DiagnosticPage() {
                 {t.goals.map((g) => (
                   <button
                     key={g.id}
-                    onClick={() => setGoal(g.id as Goal)}
-                    className={`py-3 px-4 text-sm font-medium border transition-all text-left ${
+                    disabled={g.id !== goal}
+                    className={`py-3 px-4 text-sm font-medium border transition-all text-left disabled:cursor-not-allowed ${
                       goal === g.id
                         ? "bg-primary text-foreground border-primary"
-                        : "bg-surface text-muted border-border hover:border-primary hover:text-foreground"
+                        : "bg-surface text-muted border-border disabled:opacity-40"
                     }`}
                   >
                     {g.label}
@@ -306,7 +380,7 @@ export default function DiagnosticPage() {
 
             <button
               onClick={startTest}
-              disabled={loading || !subject}
+              disabled={loading}
               className="flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-3 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-all disabled:opacity-40"
             >
               {loading ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
@@ -318,7 +392,7 @@ export default function DiagnosticPage() {
         {step === "test" && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h1 className="text-xl font-semibold text-foreground">{subject}</h1>
+              <h1 className="text-xl font-semibold text-foreground">{demoSubject}</h1>
               <div className="flex items-center gap-3 text-xs text-muted">
                 <span>
                   {answers.filter((a) => a >= 0).length}/{questions.length} {t.qLabel}
@@ -382,19 +456,51 @@ export default function DiagnosticPage() {
             </div>
 
             <div className="bg-surface border border-border p-8 flex flex-col sm:flex-row items-center gap-8">
-              <div className="w-28 h-28 rounded-full border-4 border-primary flex items-center justify-center shrink-0">
-                <div className="text-center">
-                  <div className="text-3xl font-semibold text-foreground">
-                    {result.correct}/{result.total}
-                  </div>
-                  <div className="font-mono text-[9px] uppercase tracking-widest text-muted">{t.of}</div>
-                </div>
-              </div>
+              <ScoreRing correct={result.correct} total={result.total} />
               <div className="space-y-2 text-center sm:text-left">
-                <div className="inline-block border border-primary/40 bg-primary/10 text-primary px-3 py-1 font-mono text-[10px] uppercase tracking-widest">
+                <div className="inline-block animate-pop-in border border-primary/40 bg-primary/10 text-primary px-3 py-1 font-mono text-[10px] uppercase tracking-widest">
                   {t.level[result.level]}
                 </div>
+                {result.correct === result.total && (
+                  <div className="inline-block animate-pop-in border border-green-400 bg-green-50 text-green-700 px-3 py-1 font-mono text-[10px] uppercase tracking-widest">
+                    ★ {t.perfect}
+                  </div>
+                )}
                 <p className="text-sm text-foreground leading-relaxed">{result.feedback || "—"}</p>
+              </div>
+            </div>
+            <Confetti burst={celebrate} count={result.correct === result.total ? 180 : 90} />
+
+            <div className="bg-surface border border-border p-5 space-y-3">
+              <p className="text-sm font-medium text-foreground">{t.review}</p>
+              <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                {questions.map((q, i) => {
+                  const isCorrect = answers[i] === q.answer;
+                  return (
+                    <div
+                      key={i}
+                      className={`border p-3 ${isCorrect ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <span
+                          className={`flex-shrink-0 mt-0.5 font-mono text-[9px] uppercase tracking-wider border px-1.5 py-0.5 ${
+                            isCorrect ? "border-green-300 text-green-700" : "border-red-300 text-red-600"
+                          }`}
+                        >
+                          {isCorrect ? t.correctLabel : t.wrongLabel}
+                        </span>
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm text-foreground leading-snug">{q.q}</p>
+                          <p className="text-xs text-muted">
+                            {t.yourAnswer}: {q.options[answers[i]] ?? "—"}
+                            {!isCorrect && ` · ${q.options[q.answer]}`}
+                          </p>
+                          {q.explain && <p className="text-xs text-muted leading-snug">{q.explain}</p>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -423,7 +529,7 @@ export default function DiagnosticPage() {
                 onClick={() => {
                   const weak = result.weak_topics.join(",");
                   router.push(
-                    `/roadmap?topic=${encodeURIComponent(subject)}&goal=${goal}&level=${result.level}&weak=${encodeURIComponent(weak)}`
+                    `/roadmap?topic=${encodeURIComponent(demoSubject)}&goal=${goal}&level=${result.level}&weak=${encodeURIComponent(weak)}`
                   );
                 }}
                 className="flex items-center justify-center gap-2 px-5 py-3 bg-primary hover:bg-primary-hover text-foreground text-sm font-medium transition-all"
@@ -431,7 +537,7 @@ export default function DiagnosticPage() {
                 <Target size={15} /> {t.roadmap}
               </button>
               <button
-                onClick={() => router.push(`/workspace?topic=${encodeURIComponent(`${subject} — ${goal}`)}&level=${result.level}`)}
+                onClick={() => router.push(`/workspace?topic=${encodeURIComponent(`${demoSubject} — ${goal}`)}&level=${result.level}`)}
                 className="flex items-center justify-center gap-2 px-5 py-3 border border-primary text-primary hover:bg-primary/10 text-sm font-medium transition-all"
               >
                 <ArrowRight size={15} /> {t.lesson}

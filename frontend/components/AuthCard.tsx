@@ -22,6 +22,7 @@ const I18N: Record<Locale, Record<string, string>> = {
     studentRole: "Оқушы",
     teacherRole: "Мұғалім",
     confirmEmail: "Растау үшін email тексеріңіз.",
+    alreadyRegistered: "Бұл emailге аккаунт бар. Кіруга көштік.",
     failed: "Кіру сәтсіз аяқталды",
     switchLogin: "Аккаунтыңыз бар ма? Кіру",
     switchSignup: "Аккаунтыңыз жоқ па? Тіркелу",
@@ -46,6 +47,7 @@ const I18N: Record<Locale, Record<string, string>> = {
     studentRole: "Ученик",
     teacherRole: "Учитель",
     confirmEmail: "Проверьте email для подтверждения.",
+    alreadyRegistered: "Аккаунт с таким email уже существует. Переключились на вход.",
     failed: "Не удалось войти",
     switchLogin: "Уже есть аккаунт? Войти",
     switchSignup: "Нет аккаунта? Зарегистрироваться",
@@ -70,6 +72,7 @@ const I18N: Record<Locale, Record<string, string>> = {
     studentRole: "Student",
     teacherRole: "Teacher",
     confirmEmail: "Check your email to confirm signup.",
+    alreadyRegistered: "An account with this email already exists. Switched to sign in.",
     failed: "Authentication failed",
     switchLogin: "Already have an account? Sign in",
     switchSignup: "Don't have an account? Sign up",
@@ -121,21 +124,35 @@ export default function AuthCard() {
           password,
           options: { data: { role } },
         });
-        if (error) throw error;
-        if (data.user) {
-          await applyRole(data.user.id);
-        } else {
-          localStorage.setItem("immergo-pending-role", role);
-          setMessage(t.confirmEmail);
+        if (error && error.code !== "user_already_exists") throw error;
+
+        if (error) {
+          // Account already exists — just log the user in instead of erroring out.
+          const l = await supabase.auth.signInWithPassword({ email, password });
+          if (l.error || !l.data.session) {
+            setMessage(t.alreadyRegistered);
+            setMode("login");
+            return;
+          }
+          window.location.href = "/";
         }
+
         if (!data.session) {
-          setMessage(t.confirmEmail);
-          return;
+          // No session (e.g. email confirmation still enabled server-side): try a direct login.
+          const l = await supabase.auth.signInWithPassword({ email, password });
+          if (l.error || !l.data.session) {
+            setMessage(t.confirmEmail);
+            return;
+          }
+          if (l.data.user) await applyRole(l.data.user.id);
+          window.location.href = "/";
         }
+
+        if (data.user) await applyRole(data.user.id);
         window.location.href = "/";
       }
-    } catch (err: any) {
-      setMessage(err.message || t.failed);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : t.failed);
     } finally {
       setLoading(false);
     }
@@ -153,8 +170,8 @@ export default function AuthCard() {
       });
       if (error) throw error;
       window.location.href = "/";
-    } catch (err: any) {
-      setMessage(err.message || t.failed);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : t.failed);
       setSso(null);
     }
   };

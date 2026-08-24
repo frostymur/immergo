@@ -128,12 +128,13 @@ export async function apiRoadmap(
   goal: Goal,
   lang: string,
   level: string = "intermediate",
-  weakTopics: string[] = []
+  weakTopics: string[] = [],
+  grade: string = ""
 ) {
   return apiFetch("/api/ai/roadmap", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, goal, lang, level, weak_topics: weakTopics }),
+    body: JSON.stringify({ topic, goal, lang, level, weak_topics: weakTopics, grade }),
   }) as Promise<RoadmapData>;
 }
 
@@ -151,6 +152,7 @@ export type LessonBlock = {
     | "steps"
     | "table"
     | "diagram"
+    | "svg"
     | "choice"
     | "task"
     | "feedback"
@@ -163,11 +165,18 @@ export type LessonBlock = {
   correct?: boolean;
   material?: boolean;
   step?: number;
+  content?: string;
+  // Legacy / fallback nested structures
   table?: { columns?: string[]; rows?: string[][] };
   diagram?: {
     nodes?: { id: string; label: string; shape?: "start" | "decision" | "end" }[];
     edges?: [string, string, string?][];
   };
+  // Flat properties (what the LLM actually produces)
+  columns?: string[];
+  rows?: string[][];
+  nodes?: { id: string; label: string; shape?: "start" | "decision" | "end" }[];
+  edges?: [string, string, string?][];
 };
 
 export type LessonPlanStep = {
@@ -279,15 +288,115 @@ export async function fetchLesson(sessionId: string): Promise<{
   return apiFetch(`/api/ai/lesson/${sessionId}`);
 }
 
-export async function fetchTtsAudio(text: string, lang: string): Promise<Blob> {
+export type TtsVoice = { id: string; name: string; gender: string };
+export type TtsVoices = Record<"kz" | "ru" | "en", TtsVoice[]>;
+
+export async function fetchTtsAudio(text: string, lang: string, voice?: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/ai/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, lang }),
+    body: JSON.stringify({ text, lang, voice }),
   });
   if (!res.ok) {
     const msg = await res.text().catch(() => "");
     throw new Error(`TTS ${res.status}: ${msg}`);
   }
   return res.blob();
+}
+
+export async function fetchTtsVoices(): Promise<TtsVoices> {
+  const res = await fetch(`${API_BASE}/api/ai/tts/voices`);
+  if (!res.ok) throw new Error(`Voices ${res.status}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Teacher class analytics
+// ---------------------------------------------------------------------------
+
+export type DiagnosticHistoryItem = {
+  subject: string;
+  correct: number;
+  total: number;
+  pct: number | null;
+  level: string | null;
+  created_at: string;
+};
+
+export type StudentReadiness = {
+  user_id: string;
+  email: string | null;
+  subject: string | null;
+  correct: number | null;
+  total: number | null;
+  pct: number | null;
+  level: string | null;
+  completed: number;
+  failed: number;
+  assignments_done: number;
+  assignments_total: number;
+  roadmap_done: number;
+  roadmap_total: number;
+  readiness_score: number | null;
+  readiness: "ready" | "on_track" | "at_risk" | "no_data";
+  diagnostics: DiagnosticHistoryItem[];
+};
+
+export type TopicMastery = {
+  topic: string;
+  students: number;
+  correct: number;
+  total: number;
+  pct: number;
+};
+
+export type ClassAnalytics = {
+  workspace_id: string;
+  subjects: string[];
+  students: StudentReadiness[];
+  topics: TopicMastery[];
+};
+
+export async function fetchClassAnalytics(workspaceId: string, subject?: string | null): Promise<ClassAnalytics> {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  if (subject) params.set("subject", subject);
+  return apiFetch(`/api/ai/teacher/class-analytics?${params.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Highlight API
+// ---------------------------------------------------------------------------
+
+export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+
+export type Highlight = {
+  id: string;
+  session_id: string;
+  block_idx: number;
+  selected_text: string;
+  color: HighlightColor;
+  created_at: string;
+};
+
+export async function saveHighlight(
+  sessionId: string,
+  blockIdx: number,
+  selectedText: string,
+  color: HighlightColor
+): Promise<Highlight> {
+  return apiFetch(`/api/ai/lesson/${sessionId}/highlight`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ block_idx: blockIdx, selected_text: selectedText, color }),
+  });
+}
+
+export async function deleteHighlight(sessionId: string, highlightId: string): Promise<void> {
+  await apiFetch(`/api/ai/lesson/${sessionId}/highlight/${highlightId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchHighlights(sessionId: string): Promise<Highlight[]> {
+  return apiFetch(`/api/ai/lesson/${sessionId}/highlights`);
 }

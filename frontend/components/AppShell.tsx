@@ -1,9 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
+import ReminderBell from "@/components/ReminderBell";
+import LogoutButton from "@/components/LogoutButton";
+import { createClient } from "@/lib/supabase/client";
 
 const FULLSCREEN_PREFIXES = ["/workspace", "/diagnostic", "/roadmap", "/auth"];
 
@@ -15,10 +18,24 @@ const FULLSCREEN_PREFIXES = ["/workspace", "/diagnostic", "/roadmap", "/auth"];
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const isFullscreen = FULLSCREEN_PREFIXES.some((p) => pathname?.startsWith(p));
+  // The marketing landing ("/" for anonymous visitors) owns its own pill nav,
+  // so the app sidebar stays hidden until we know a session exists.
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  useEffect(() => {
+    const supabase = createClient();
+    // Keep auth in sync across sign-in/sign-out so the sidebar/fullscreen
+    // layout and the marketing landing update without a page reload.
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+    });
+    supabase.auth.getUser().then(({ data }) => setAuthed(!!data.user));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  const isFullscreen =
+    FULLSCREEN_PREFIXES.some((p) => pathname?.startsWith(p)) || (pathname === "/" && authed !== true);
 
   if (isFullscreen) {
-    return <div className="flex min-h-screen">{children}</div>;
+    return <div className="min-h-screen">{children}</div>;
   }
 
   return (
@@ -39,8 +56,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           aria-label="Open menu"
         >
           <Menu size={18} />
+          <img src="/icon.svg" alt="" className="h-5 w-5" />
           immergo
         </button>
+        <div className="flex items-center gap-2">
+          <ReminderBell />
+          <LogoutButton />
+        </div>
       </header>
 
       <div className="lg:ml-[280px]">{children}</div>

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useLocale } from "@/components/LocaleProvider";
 import { useUserRole } from "@/lib/useUserRole";
+import ReminderBell from "@/components/ReminderBell";
 
 export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) {
   const pathname = usePathname();
@@ -21,6 +22,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: bo
     { href: "/", label: t("landing.title") },
     { href: "/dashboard", label: t("nav.dashboard") },
     { href: "/my-classes", label: t("nav.lessons") },
+    { href: "/roadmap", label: t("nav.roadmap") },
     ...(role === "teacher" ? [{ href: "/teacher", label: t("nav.teacher") }] : []),
   ];
 
@@ -39,15 +41,18 @@ export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: bo
 
   return (
     <aside
-      className={`fixed top-0 left-0 h-screen w-[280px] bg-sidebar-bg border-r border-border flex flex-col z-50 transition-transform duration-200 lg:translate-x-0 ${
+      className={`fixed top-0 left-0 h-dvh w-[280px] max-w-[85vw] bg-sidebar-bg border-r border-border flex flex-col z-50 transition-transform duration-200 lg:translate-x-0 ${
         mobileOpen ? "translate-x-0" : "-translate-x-full"
       }`}
     >
-      <div className="px-6 pt-8 pb-6 border-b border-border">
-        <span className="font-mono text-lg font-semibold tracking-tight">immergo</span>
-        <div className="font-mono text-[10px] uppercase tracking-widest text-muted mt-0.5">
-          [ INSTITUTIONAL ]
+      <div className="flex items-start justify-between px-6 pt-8 pb-6 border-b border-border">
+        <div>
+          <span className="font-mono text-lg font-semibold tracking-tight flex items-center gap-2"><img src="/icon.svg" alt="" className="h-6 w-6" />immergo</span>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted mt-0.5">
+            [ INSTITUTIONAL ]
+          </div>
         </div>
+        <ReminderBell />
       </div>
 
       <nav className="flex-1 px-3 py-4">

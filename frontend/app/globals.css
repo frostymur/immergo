@@ -30,6 +30,34 @@
   }
 }
 
+/* Reward moments: floating XP pill, pop-in chips, wrong-answer shake */
+@keyframes xp-float {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(0.8); }
+  15% { opacity: 1; transform: translate(-50%, 0) scale(1.08); }
+  30% { transform: translate(-50%, 0) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -32px) scale(0.95); }
+}
+
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+
+@keyframes flame-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.85; }
+}
+
 @layer utilities {
   .font-hand {
     font-family: var(--font-hand), "Comic Sans MS", cursive;
@@ -39,6 +67,18 @@
   }
   .animate-board-in {
     animation: board-in 0.45s ease-out both;
+  }
+  .animate-xp-float {
+    animation: xp-float 1.8s ease-out both;
+  }
+  .animate-pop-in {
+    animation: pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .animate-shake-x {
+    animation: shake-x 0.4s ease-in-out both;
+  }
+  .animate-flame-pulse {
+    animation: flame-pulse 1.6s ease-in-out infinite;
   }
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import InputCard from "@/components/InputCard";
 import UserAvatar from "@/components/UserAvatar";
+import MarketingLanding from "@/components/MarketingLanding";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
 import { useUserRole } from "@/lib/useUserRole";
@@ -19,6 +20,7 @@ export default function Home() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [classesLoading, setClassesLoading] = useState(true);
   const [lessons, setLessons] = useState<{ id: string; prompt: string; created_at: string }[]>([]);
+  const [authed, setAuthed] = useState<boolean | null>(null);
   const supabase = createClient();
   const { role, loading: roleLoading } = useUserRole();
 
@@ -45,12 +47,17 @@ export default function Home() {
           ];
 
   useEffect(() => {
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+    });
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) {
+        setAuthed(false);
         setClassesLoading(false);
         return;
       }
+      setAuthed(true);
       const userId = userData.user.id;
       const roleStr = userData.user.user_metadata?.role;
 
@@ -87,12 +94,17 @@ export default function Home() {
       setClasses([...map.values()]);
       setClassesLoading(false);
     })();
+    return () => authSub.subscription.unsubscribe();
   }, [supabase]);
 
   const handleSubmit = (text: string) => {
     setLoading(true);
     router.push(`/workspace?topic=${encodeURIComponent(text)}`);
   };
+
+  // Anonymous visitors see the marketing landing; signed-in users get the app home.
+  if (authed === false) return <MarketingLanding />;
+  if (authed === null) return <div className="min-h-screen bg-background" />;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -168,10 +180,10 @@ export default function Home() {
                       href={`/workspace?lesson=${l.id}`}
                       className="flex items-center justify-between p-4 hover:bg-surface-hover transition-colors"
                     >
-                      <div className="flex items-center gap-3">
-                        <BookOpen size={14} className="text-muted" />
-                        <div>
-                          <div className="text-sm font-medium">{l.prompt}</div>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <BookOpen size={14} className="text-muted shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{l.prompt}</div>
                           <div className="text-xs text-muted">
                             {new Date(l.created_at).toLocaleDateString(
                               locale === "kz" ? "kk-KZ" : locale === "ru" ? "ru-RU" : "en-US",
@@ -215,10 +227,10 @@ export default function Home() {
                     href={c.role === "owner" ? "/teacher" : `/workspace?workspace_id=${c.id}`}
                     className="flex items-center justify-between p-4 hover:bg-surface-hover transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <BookOpen size={14} className="text-muted" />
-                      <div>
-                        <div className="text-sm font-medium">{c.title}</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <BookOpen size={14} className="text-muted shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{c.title}</div>
                         <div className="text-xs text-muted">
                           {c.subject} {c.grade ? `/ Grade ${c.grade}` : ""}
                         </div>

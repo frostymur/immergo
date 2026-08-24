@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Shantell_Sans, Bitter } from "next/font/google";
 import "./globals.css";
+import "katex/dist/katex.min.css";
 import { LocaleProvider } from "@/components/LocaleProvider";
 import AppShell from "@/components/AppShell";
 

@@ -18,6 +18,7 @@ from app.db.database import (
     vector_search,
 )
 from app.schemas.ai import (
+    ClassAnalyticsResponse,
     DiagnosticEvaluateRequest,
     DiagnosticEvaluateResponse,
     DiagnosticStartRequest,
@@ -25,6 +26,8 @@ from app.schemas.ai import (
     GeneratePodcastRequest,
     GeneratePodcastResponse,
     HeatmapResponse,
+    HighlightCreate,
+    HighlightResponse,
     LessonMessageRequest,
     LessonStartRequest,
     LessonStateResponse,
@@ -48,12 +51,14 @@ from app.services.llm import (
     generate_podcast_script,
     generate_roadmap,
     generate_summary,
+    grade_answer,
+    merge_plan_update,
     socratic_response,
     stream_lesson_turn,
 )
 from app.services.pdf_parser import chunk_text, parse_pdf
 from app.services.storage import LOCAL_STORAGE_ROOT, download_file, get_supabase, upload_file
-from app.services.tts import generate_podcast_audio, synthesize_text
+from app.services.tts import generate_podcast_audio, list_voices, synthesize_text
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -374,6 +379,7 @@ async def _stream_lesson(
     topic: str | None = None,
     plan: list[dict[str, str]] | None = None,
     level: str = "intermediate",
+    verdict: dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE generator: streams one tutor turn, persisting each block.
 
@@ -393,6 +399,7 @@ async def _stream_lesson(
             topic=topic,
             plan=plan,
             level=level,
+            verdict=verdict,
         ):
             if block.get("kind") == "plan_update":
                 new_steps = [
@@ -400,7 +407,7 @@ async def _stream_lesson(
                 ]
                 if new_steps:
                     base_step = max((b.get("step", -1) for b in history), default=-1)
-                    merged = (list(plan[: base_step + 1]) if plan else []) + new_steps
+                    merged = merge_plan_update(plan, base_step, new_steps)
                     await execute(
                         "UPDATE lesson_sessions SET plan = $2::jsonb WHERE id = $1",
                         uuid.UUID(session_id),
@@ -496,6 +503,13 @@ async def lesson_message(session_id: str, body: LessonMessageRequest):
     if raw_plan:
         plan = json.loads(raw_plan) if isinstance(raw_plan, str) else raw_plan
 
+    # Dedicated grader for the pending task (falls back to the teacher's own
+    # judgement when the grader is unavailable or times out).
+    verdict = None
+    task_block = next((b for b in reversed(history) if b.get("kind") == "task"), None)
+    if task_block and (task_block.get("text") or "").strip():
+        verdict = await grade_answer(task_block["text"], text, lang=lang)
+
     async def event_stream() -> AsyncGenerator[str, None]:
         yield _sse({"kind": "student", "idx": student_idx, "block": student_block})
         async for event in _stream_lesson(
@@ -508,6 +522,7 @@ async def lesson_message(session_id: str, body: LessonMessageRequest):
             student_message=text,
             topic=session["prompt"],
             plan=plan,
+            verdict=verdict,
         ):
             yield event
 
@@ -545,11 +560,16 @@ async def lesson_state(session_id: str):
 @router.post("/tts")
 async def tts(body: TtsRequest, background_tasks: BackgroundTasks):
     try:
-        audio_path = await synthesize_text(body.text, body.lang)
+        audio_path = await synthesize_text(body.text, body.lang, body.voice)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"TTS failed: {exc}")
     background_tasks.add_task(lambda: os.path.exists(audio_path) and os.remove(audio_path))
     return FileResponse(audio_path, media_type="audio/mpeg", filename="speech.mp3")
+
+
+@router.get("/tts/voices")
+async def tts_voices():
+    return await list_voices()
 
 
 @router.get("/teacher/heatmap", response_model=HeatmapResponse)
@@ -582,8 +602,269 @@ async def teacher_heatmap(workspace_id: str):
     return HeatmapResponse(workspace_id=workspace_id, nodes=nodes)
 
 
+@router.get("/teacher/class-analytics", response_model=ClassAnalyticsResponse)
+async def teacher_class_analytics(workspace_id: str, subject: str | None = None):
+    """Class-level analytics for a teacher workspace:
+
+    - per-student readiness (latest diagnostic level/score + progress + homework)
+    - topic mastery aggregated across students' latest diagnostic answers
+      (which curriculum topics the class struggles with)
+
+    Pass `subject` to scope every number to one subject (students take
+    self-service diagnostics in any subject; a teacher reviews per subject).
+    """
+    try:
+        ws_uuid = uuid.UUID(workspace_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    subject_rows = await fetch_many(
+        """
+        SELECT DISTINCT dr.subject
+        FROM diagnostic_results dr
+        WHERE dr.user_id IN (
+            SELECT student_id FROM class_memberships WHERE workspace_id = $1
+        )
+        ORDER BY dr.subject
+        """,
+        ws_uuid,
+    )
+    subjects = [r["subject"] for r in subject_rows]
+
+    students = await fetch_many(
+        """
+        SELECT p.id, p.email, dr.subject, dr.correct, dr.total, dr.level, dr.answers
+        FROM class_memberships m
+        JOIN profiles p ON p.id = m.student_id
+        LEFT JOIN LATERAL (
+            SELECT subject, correct, total, level, answers
+            FROM diagnostic_results
+            WHERE user_id = m.student_id
+              AND ($2::text IS NULL OR subject = $2)
+            ORDER BY created_at DESC
+            LIMIT 1
+        ) dr ON true
+        WHERE m.workspace_id = $1
+        ORDER BY p.email NULLS LAST
+        """,
+        ws_uuid,
+        subject,
+    )
+    if not students:
+        # workspace exists but nobody joined yet — not an error
+        row = await fetch_one("SELECT id FROM workspaces WHERE id = $1", ws_uuid)
+        if not row:
+            raise HTTPException(status_code=404, detail="Class not found")
+
+    progress = {
+        r["student_id"]: r
+        for r in await fetch_many(
+            """
+            SELECT student_id,
+                   COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+                   COUNT(*) FILTER (WHERE status <> 'completed') AS failed
+            FROM student_progress
+            WHERE workspace_id = $1
+            GROUP BY student_id
+            """,
+            ws_uuid,
+        )
+    }
+    assignments_total = await fetch_one(
+        "SELECT COUNT(*) AS c FROM assignments WHERE workspace_id = $1",
+        ws_uuid,
+    )
+    homework_done = {
+        r["student_id"]: r["done"]
+        for r in await fetch_many(
+            """
+            SELECT ap.student_id, COUNT(DISTINCT ap.assignment_id) AS done
+            FROM assignment_progress ap
+            JOIN assignments a ON a.id = ap.assignment_id
+            WHERE a.workspace_id = $1 AND ap.status = 'done'
+            GROUP BY ap.student_id
+            """,
+            ws_uuid,
+        )
+    }
+
+    # Latest roadmap plan per student (scoped to the subject when filtering):
+    # course completion is a first-class readiness signal, not just the test.
+    roadmap_map: dict[Any, dict[str, Any]] = {}
+    for r in await fetch_many(
+        """
+        SELECT p.user_id, p.topic, p.stages, p.created_at,
+               COUNT(rp.stage_index) AS done
+        FROM roadmap_plans p
+        LEFT JOIN roadmap_progress rp
+            ON rp.plan_id = p.id AND rp.user_id = p.user_id
+        WHERE p.user_id = ANY($1::uuid[])
+          AND ($2::text IS NULL OR p.topic = $2)
+        GROUP BY p.id
+        ORDER BY p.created_at DESC
+        """,
+        [s["id"] for s in students],
+        subject,
+    ):
+        if r["user_id"] in roadmap_map:
+            continue  # keep only the most recent plan
+        raw_stages = r["stages"]
+        if isinstance(raw_stages, str):  # asyncpg returns JSONB as text
+            try:
+                raw_stages = json.loads(raw_stages)
+            except json.JSONDecodeError:
+                raw_stages = []
+        stage_count = len(raw_stages) if isinstance(raw_stages, list) else 0
+        roadmap_map[r["user_id"]] = {
+            "topic": r["topic"],
+            "done": r["done"],
+            "total": stage_count,
+        }
+
+    # Full diagnostic history per student — a student may take the test
+    # several times (self-service or re-takes), the teacher sees the whole
+    # trend, not just the latest snapshot.
+    diag_history: dict[Any, list[dict[str, Any]]] = {s["id"]: [] for s in students}
+    for r in await fetch_many(
+        """
+        SELECT user_id, subject, correct, total, level, created_at
+        FROM diagnostic_results
+        WHERE user_id = ANY($1::uuid[])
+          AND ($2::text IS NULL OR subject = $2)
+        ORDER BY created_at DESC
+        """,
+        [s["id"] for s in students],
+        subject,
+    ):
+        diag_history.setdefault(r["user_id"], []).append(
+            {
+                "subject": r["subject"],
+                "correct": r["correct"],
+                "total": r["total"],
+                "pct": round(100 * r["correct"] / r["total"]) if r["total"] else None,
+                "level": r["level"],
+                "created_at": r["created_at"].isoformat(),
+            }
+        )
+
+    # Aggregate topic mastery from each student's latest diagnostic answers.
+    topic_stats: dict[str, dict[str, int]] = {}
+    for s in students:
+        raw_answers = s["answers"]
+        if isinstance(raw_answers, str):  # asyncpg returns JSONB as text
+            try:
+                raw_answers = json.loads(raw_answers)
+            except json.JSONDecodeError:
+                raw_answers = []
+        for a in raw_answers or []:
+            if not isinstance(a, dict):
+                continue
+            topic = str(a.get("topic") or "").strip()
+            if not topic:
+                continue
+            st = topic_stats.setdefault(topic, {"students": 0, "correct": 0, "total": 0})
+            st["students"] += 1
+            st["total"] += 1
+            if a.get("correct"):
+                st["correct"] += 1
+
+    topics = [
+        {
+            "topic": topic,
+            "students": st["students"],
+            "correct": st["correct"],
+            "total": st["total"],
+            "pct": round(100 * st["correct"] / st["total"]) if st["total"] else 0,
+        }
+        for topic, st in topic_stats.items()
+    ]
+    topics.sort(key=lambda t: (t["pct"], -t["total"]))
+
+    def composite_score(*parts: tuple[float, int | None]) -> int | None:
+        """Weighted average over the signals that exist (weights renormalize)."""
+        present = [(w, v) for w, v in parts if v is not None]
+        if not present:
+            return None
+        weight_sum = sum(w for w, _ in present)
+        return round(sum(w * v for w, v in present) / weight_sum)
+
+    students_out = []
+    for s in students:
+        p = progress.get(s["id"])
+        correct, total = s["correct"] or 0, s["total"] or 0
+        diag_pct = round(100 * correct / total) if total else None
+
+        attempts = (p["completed"] + p["failed"]) if p else 0
+        practice_pct = round(100 * p["completed"] / attempts) if attempts else None
+
+        rm = roadmap_map.get(s["id"])
+        roadmap_pct = round(100 * rm["done"] / rm["total"]) if rm and rm["total"] else None
+
+        # A short test alone cannot judge exam readiness, so the readiness
+        # label is a composite score: knowledge (diagnostic) + course
+        # completion (roadmap) + practice (lesson tasks).
+        score = composite_score(
+            (0.5, diag_pct),
+            (0.3, roadmap_pct),
+            (0.2, practice_pct),
+        )
+        readiness = (
+            "no_data"
+            if score is None
+            else "ready" if score >= 75 else "on_track" if score >= 45 else "at_risk"
+        )
+        students_out.append(
+            {
+                "user_id": str(s["id"]),
+                "email": s["email"],
+                "subject": s["subject"],
+                "correct": correct if total else None,
+                "total": total or None,
+                "pct": diag_pct,
+                "level": s["level"],
+                "completed": p["completed"] if p else 0,
+                "failed": p["failed"] if p else 0,
+                "assignments_done": homework_done.get(s["id"], 0),
+                "assignments_total": assignments_total["c"] or 0,
+                "roadmap_done": rm["done"] if rm else 0,
+                "roadmap_total": rm["total"] if rm else 0,
+                "readiness_score": score,
+                "readiness": readiness,
+                "diagnostics": diag_history.get(s["id"], []),
+            }
+        )
+
+    return ClassAnalyticsResponse(
+        workspace_id=workspace_id,
+        subjects=subjects,
+        students=students_out,
+        topics=topics,
+    )
+
+
 @router.post("/diagnostic/start", response_model=DiagnosticStartResponse)
 async def diagnostic_start(body: DiagnosticStartRequest):
+    """Return the shared diagnostic test for (subject, grade, goal, lang).
+
+    Tests are persisted in diagnostic_tests so every student in the class
+    gets the same test (a fresh LLM generation only on first use).
+    """
+    shared = await fetch_one(
+        """
+        SELECT questions FROM diagnostic_tests
+        WHERE subject = $1 AND grade = $2 AND goal = $3 AND lang = $4
+        """,
+        body.subject,
+        body.grade,
+        body.goal,
+        body.lang,
+    )
+    if shared:
+        questions = shared["questions"]
+        if isinstance(questions, str):  # asyncpg returns JSONB as text
+            questions = json.loads(questions)
+        return DiagnosticStartResponse(questions=questions)
+
     questions = await generate_diagnostic_test(
         subject=body.subject,
         grade=body.grade,
@@ -592,6 +873,19 @@ async def diagnostic_start(body: DiagnosticStartRequest):
     )
     if not questions:
         raise HTTPException(status_code=502, detail="Diagnostic generation failed")
+
+    await execute(
+        """
+        INSERT INTO diagnostic_tests (subject, grade, goal, lang, questions)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (subject, grade, goal, lang) DO NOTHING
+        """,
+        body.subject,
+        body.grade,
+        body.goal,
+        body.lang,
+        json.dumps(questions, ensure_ascii=False),
+    )
     return DiagnosticStartResponse(questions=questions)
 
 
@@ -641,6 +935,7 @@ async def roadmap(body: RoadmapRequest):
         lang=body.lang,
         level=body.level,
         weak_topics=body.weak_topics,
+        grade=body.grade,
     )
     if not result.get("stages"):
         raise HTTPException(status_code=502, detail="Roadmap generation failed")
@@ -675,3 +970,101 @@ async def source_file(source_id: str):
         with open(local, "rb") as f:
             data = f.read()
         return Response(content=data, media_type="application/pdf", headers=headers)
+
+
+@router.post("/lesson/{session_id}/highlight", response_model=HighlightResponse)
+async def save_highlight(session_id: str, body: HighlightCreate):
+    """Save a user text highlight on a lesson block.
+
+    Re-saving the same (block, text) updates the color in place, so a user can
+    re-color an existing highlight instead of stacking a duplicate.
+    """
+    session = await fetch_one(
+        "SELECT id FROM lesson_sessions WHERE id = $1",
+        uuid.UUID(session_id),
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Lesson session not found")
+
+    existing = await fetch_one(
+        """
+        SELECT id FROM lesson_highlights
+        WHERE session_id = $1 AND block_idx = $2 AND selected_text = $3
+        """,
+        uuid.UUID(session_id),
+        body.block_idx,
+        body.selected_text,
+    )
+    if existing:
+        row = await fetch_one(
+            """
+            UPDATE lesson_highlights SET color = $1 WHERE id = $2
+            RETURNING id, session_id, block_idx, selected_text, color, created_at
+            """,
+            body.color,
+            existing["id"],
+        )
+    else:
+        row = await fetch_one(
+            """
+            INSERT INTO lesson_highlights (id, session_id, block_idx, selected_text, color)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, session_id, block_idx, selected_text, color, created_at
+            """,
+            uuid.UUID(str(uuid.uuid4())),
+            uuid.UUID(session_id),
+            body.block_idx,
+            body.selected_text,
+            body.color,
+        )
+    return HighlightResponse(
+        id=str(row["id"]),
+        session_id=str(row["session_id"]),
+        block_idx=row["block_idx"],
+        selected_text=row["selected_text"],
+        color=row["color"],
+        created_at=row["created_at"].isoformat(),
+    )
+
+
+@router.delete("/lesson/{session_id}/highlight/{highlight_id}")
+async def delete_highlight(session_id: str, highlight_id: str):
+    """Delete a user highlight."""
+    await execute(
+        "DELETE FROM lesson_highlights WHERE id = $1 AND session_id = $2",
+        uuid.UUID(highlight_id),
+        uuid.UUID(session_id),
+    )
+    return {"deleted": True}
+
+
+@router.get("/lesson/{session_id}/highlights", response_model=list[HighlightResponse])
+async def get_highlights(session_id: str):
+    """Retrieve all highlights for a lesson session."""
+    session = await fetch_one(
+        "SELECT id FROM lesson_sessions WHERE id = $1",
+        uuid.UUID(session_id),
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Lesson session not found")
+
+    rows = await fetch_many(
+        """
+        SELECT id, session_id, block_idx, selected_text, color, created_at
+        FROM lesson_highlights
+        WHERE session_id = $1
+        ORDER BY created_at ASC
+        """,
+        uuid.UUID(session_id),
+    )
+    return [
+        HighlightResponse(
+            id=str(r["id"]),
+            session_id=str(r["session_id"]),
+            block_idx=r["block_idx"],
+            selected_text=r["selected_text"],
+            color=r["color"],
+            created_at=r["created_at"].isoformat(),
+        )
+        for r in rows
+    ]

@@ -17,14 +17,42 @@ async def synthesize_line(text: str, voice: str, output_path: str) -> None:
     await communicate.save(output_path)
 
 
-async def synthesize_text(text: str, lang: str = "en") -> str:
+async def synthesize_text(text: str, lang: str = "en", voice: str | None = None) -> str:
     """Synthesize a single text to an MP3 temp file. Returns the file path."""
-    voice = VOICE_MAP.get(lang, VOICE_MAP["en"])
+    voice = voice or VOICE_MAP.get(lang, VOICE_MAP["en"])
     fd, out_path = tempfile.mkstemp(suffix=".mp3", prefix="immergo_tts_")
     os.close(fd)
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(out_path)
     return out_path
+
+
+VOICE_LANG_PREFIXES = {"kz": "kk-KZ-", "ru": "ru-RU-", "en": "en-US-"}
+
+
+async def list_voices() -> dict[str, list[dict[str, str]]]:
+    """Available TTS voices per language (from the edge-tts catalog)."""
+    result: dict[str, list[dict[str, str]]] = {"kz": [], "ru": [], "en": []}
+    try:
+        voices = await edge_tts.list_voices()
+        for v in voices:
+            sn = v.get("ShortName", "")
+            for lang, prefix in VOICE_LANG_PREFIXES.items():
+                if sn.startswith(prefix):
+                    result[lang].append(
+                        {
+                            "id": sn,
+                            "name": v.get("FriendlyName", sn),
+                            "gender": v.get("Gender", ""),
+                        }
+                    )
+    except Exception:
+        pass
+    for lang in result:
+        if not result[lang]:
+            default = VOICE_MAP.get(lang, VOICE_MAP["en"])
+            result[lang] = [{"id": default, "name": default, "gender": ""}]
+    return result
 
 
 def _has_ffmpeg() -> bool:

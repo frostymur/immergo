@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- lilac capsule (learning / board) -->
+  <rect x="14" y="8" width="24" height="16" rx="8" fill="#A78BFA"/>
+  <!-- blue circle (student) -->
+  <circle cx="38" cy="28" r="10" fill="#93C5FD"/>
+  <!-- lilac circle (tutor) -->
+  <circle cx="24" cy="28" r="10" fill="#A78BFA"/>
+  <!-- white glow dot (aha moment) -->
+  <circle cx="20" cy="44" r="8" fill="white"/>
+  <circle cx="20" cy="44" r="8" fill="white" opacity="0.3" filter="url(#glow)"/>
+  <!-- whiteboard brushstroke -->
+  <path d="M22 50 C28 46, 38 46, 50 48" stroke="#3B2344" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+</svg>

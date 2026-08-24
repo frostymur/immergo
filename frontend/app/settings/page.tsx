@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import UserAvatar from "@/components/UserAvatar";
 import { useLocale, type Locale } from "@/components/LocaleProvider";
+import { fetchTtsAudio, fetchTtsVoices, type TtsVoice } from "@/lib/api";
+import { getSelectedVoice, setSelectedVoice } from "@/lib/voices";
+import { Loader2, Pause, Play } from "lucide-react";
 
 const LOCALES: Locale[] = ["kz", "ru", "en"];
 const GOALS: { value: string; label: string }[] = [
@@ -13,6 +16,12 @@ const GOALS: { value: string; label: string }[] = [
   { value: "school", label: "Школьная программа / School program" },
 ];
 
+const VOICE_PREVIEW: Record<Locale, string> = {
+  kz: "Сәлем! Мен сенің жеке оқытушыңмын. Бүгін бірге оқимыз.",
+  ru: "Привет! Я твой личный репетитор. Сегодня позанимаемся вместе.",
+  en: "Hi! I'm your personal tutor. Let's learn something today.",
+};
+
 const I18N: Record<Locale, Record<string, string>> = {
   kz: {
     title: "Баптаулар",
@@ -20,6 +29,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     grade: "Сынып",
     gradePh: "Мыс.: 9",
     goal: "Мақсат",
+    voice: "Дауыс",
+    voiceHint: "Әр тілге дауысты таңдаңыз — сабақта ол осылай сөйлейді.",
+    female: "әйел",
+    male: "ер",
     save: "Сақтау",
     saved: "Сақталды",
     profile: "Профиль",
@@ -30,6 +43,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     grade: "Класс",
     gradePh: "Напр.: 9",
     goal: "Цель",
+    voice: "Голос",
+    voiceHint: "Выберите голос для каждого языка — так Immergo будет говорить на уроке.",
+    female: "женский",
+    male: "мужской",
     save: "Сохранить",
     saved: "Сохранено",
     profile: "Профиль",
@@ -40,6 +57,10 @@ const I18N: Record<Locale, Record<string, string>> = {
     grade: "Grade",
     gradePh: "E.g. 9",
     goal: "Goal",
+    voice: "Voice",
+    voiceHint: "Pick a voice for each language — Immergo will speak it in lessons.",
+    female: "female",
+    male: "male",
     save: "Save",
     saved: "Saved",
     profile: "Profile",
@@ -55,6 +76,25 @@ export default function SettingsPage() {
   const [message, setMessage] = useState("");
   const supabase = createClient();
   const t = I18N[locale];
+
+  // Voice selection (per language)
+  const [voices, setVoices] = useState<Record<Locale, TtsVoice[]> | null>(null);
+  const [voiceSel, setVoiceSel] = useState<Record<Locale, string>>({ kz: "", ru: "", en: "" });
+  const [playing, setPlaying] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setVoices(await fetchTtsVoices());
+      } catch {
+        setVoices({} as Record<Locale, TtsVoice[]>);
+      }
+      const sel = {} as Record<Locale, string>;
+      for (const l of LOCALES) sel[l] = getSelectedVoice(l) || "";
+      setVoiceSel(sel);
+    })();
+  }, []);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -86,6 +126,33 @@ export default function SettingsPage() {
       setMessage(error.message);
     } else {
       setMessage(t.saved);
+    }
+  };
+
+  const pickVoice = (l: Locale, id: string) => {
+    setVoiceSel((s) => ({ ...s, [l]: id }));
+    setSelectedVoice(l, id);
+  };
+
+  const preview = async (l: Locale, id: string) => {
+    if (playing === id) {
+      audioRef.current?.pause();
+      setPlaying(null);
+      return;
+    }
+    try {
+      const blob = await fetchTtsAudio(VOICE_PREVIEW[l], l, id);
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setPlaying(id);
+      audio.onended = () => {
+        setPlaying(null);
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
+    } catch {
+      setPlaying(null);
     }
   };
 
@@ -141,6 +208,60 @@ export default function SettingsPage() {
               >
                 {g.label}
               </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Voice picker — per language */}
+        <div>
+          <label className="block text-sm font-medium text-foreground mb-1">{t.voice}</label>
+          <p className="text-xs text-muted mb-3">{t.voiceHint}</p>
+          <div className="space-y-4">
+            {LOCALES.map((l) => (
+              <div key={l}>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-2">{l.toUpperCase()}</div>
+                {!voices ? (
+                  <div className="flex items-center gap-2 text-sm text-muted py-2">
+                    <Loader2 size={14} className="animate-spin" /> …
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {(voices[l] || []).map((v) => {
+                      const active = voiceSel[l] === v.id;
+                      const isPlaying = playing === v.id;
+                      return (
+                        <div
+                          key={v.id}
+                          onClick={() => pickVoice(l, v.id)}
+                          className={`flex items-center gap-3 border p-2.5 cursor-pointer transition-colors ${
+                            active ? "border-primary bg-primary/5" : "border-border bg-surface hover:border-primary/50"
+                          }`}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              preview(l, v.id);
+                            }}
+                            className="w-8 h-8 flex items-center justify-center border border-border text-foreground hover:border-primary transition-colors"
+                            aria-label={`Preview ${v.name}`}
+                          >
+                            {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+                          </button>
+                          <span className="text-sm font-medium flex-1 min-w-0 truncate">{v.name}</span>
+                          <span className="font-mono text-[10px] uppercase tracking-widest text-muted shrink-0">
+                            {v.gender === "Female" ? t.female : v.gender === "Male" ? t.male : ""}
+                          </span>
+                          {active && (
+                            <span className="font-mono text-[10px] uppercase tracking-widest text-primary shrink-0">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>

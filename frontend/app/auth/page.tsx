@@ -24,7 +24,7 @@ function AuthPageInner() {
     <div className="min-h-screen w-full grid place-items-center px-4 py-10">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <Link href="/" className="text-2xl font-bold text-primary tracking-tight">immergo</Link>
+          <Link href="/" className="text-2xl font-bold text-primary tracking-tight flex items-center gap-2 justify-center"><img src="/icon.svg" alt="" className="h-7 w-7" />immergo</Link>
           <p className="text-sm text-muted mt-1">
             [ AI STUDY WORKSPACE ]
           </p>

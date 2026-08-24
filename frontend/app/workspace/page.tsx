@@ -1,9 +1,10 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "@/components/LocaleProvider";
 import { createClient } from "@/lib/supabase/client";
+import Confetti from "@/components/Confetti";
 import {
   fetchLesson,
   fetchSummary,
@@ -12,14 +13,23 @@ import {
   streamLessonMessage,
   streamLessonStart,
   uploadPdf,
+  saveHighlight,
+  deleteHighlight,
+  fetchHighlights,
+  type Highlight,
+  type HighlightColor,
   type LessonBlock,
   type LessonEvent,
   type LessonPlanStep,
 } from "@/lib/api";
 import { takePendingMaterial } from "@/lib/pendingMaterial";
+import { renderRich, splitMath, MathSpan } from "@/lib/rich";
+import { getSelectedVoice } from "@/lib/voices";
+import LogoutButton from "@/components/LogoutButton";
 import {
   BookOpen,
   FileText,
+  Highlighter,
   Loader2,
   MessageSquare,
   Mic,
@@ -29,10 +39,14 @@ import {
   Plus,
   Send,
   Square,
+  TrendingDown,
+  TrendingUp,
   Upload,
   Volume2,
   VolumeX,
   X,
+  XCircle,
+  Zap,
 } from "lucide-react";
 
 type Source = { id: string; file_name: string; file_hash: string };
@@ -79,7 +93,10 @@ function WorkspaceInner() {
 
   // Student input (text-only prototype)
   const [inputText, setInputText] = useState("");
-  const messageInputRef = useRef<HTMLInputElement | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [difficulty, setDifficulty] = useState({ c: 0, w: 0, streak: 0, step: 0, dir: 0 });
+  const baseStepRef = useRef(2);
+  baseStepRef.current = lessonLevel === "beginner" ? 1 : lessonLevel === "advanced" ? 3 : 2;
 
   // Panels
   const [materialOpen, setMaterialOpen] = useState(false);
@@ -96,7 +113,9 @@ function WorkspaceInner() {
 
   // Board view — the board is an infinite canvas, pannable in any direction
   const [follow, setFollow] = useState(true);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(() => (typeof window !== "undefined" && window.innerWidth < 640 ? 0.7 : 1));
+  const [xpBurst, setXpBurst] = useState<{ key: number; ok: boolean } | null>(null);
+  const [confetti, setConfetti] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{
@@ -126,7 +145,46 @@ function WorkspaceInner() {
   const pausedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const initRef = useRef(false);
+  const spokenUpToRef = useRef(-1);
+  const pendingAskRef = useRef<string | null>(null);
   const supabase = createClient();
+
+  // Highlights
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [highlightMode, setHighlightMode] = useState(false);
+  const [colorPicker, setColorPicker] = useState<{
+    x: number;
+    y: number;
+    blockIdx: number;
+    text: string;
+  } | null>(null);
+
+  // Caption scrolling
+  const captionContainerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (captionContainerRef.current) {
+      const el = captionContainerRef.current;
+      el.scrollTop = (el.scrollHeight - el.clientHeight) * captionProg;
+    }
+  }, [captionProg, caption]);
+
+  useEffect(() => {
+    spokenUpToRef.current = spokenUpTo;
+  }, [spokenUpTo]);
+
+  const HIGHLIGHT_COLORS: { color: HighlightColor; bg: string; label: string }[] = [
+    { color: "yellow", bg: "#fef08a", label: "Yellow" },
+    { color: "green", bg: "#bbf7d0", label: "Green" },
+    { color: "blue", bg: "#bfdbfe", label: "Blue" },
+    { color: "pink", bg: "#fbcfe8", label: "Pink" },
+  ];
+
+  const COLOR_BG: Record<HighlightColor, string> = {
+    yellow: "#fef08a",
+    green: "#bbf7d0",
+    blue: "#bfdbfe",
+    pink: "#fbcfe8",
+  };
 
   // -------------------------------------------------------------------------
   // Speech (TTS) engine — plays each block's "speak" text in order
@@ -147,7 +205,7 @@ function WorkspaceInner() {
       let url = audioCache.current.get(job.key);
       if (!url) {
         try {
-          const blob = await fetchTtsAudio(job.text, locale);
+          const blob = await fetchTtsAudio(job.text, locale, getSelectedVoice(locale));
           url = URL.createObjectURL(blob);
           audioCache.current.set(job.key, url);
         } catch {
@@ -192,7 +250,7 @@ function WorkspaceInner() {
       speakQueue.current.push({ key, text });
       // Prefetch audio for smoother playback
       if (!audioCache.current.has(key)) {
-        fetchTtsAudio(text, locale)
+        fetchTtsAudio(text, locale, getSelectedVoice(locale))
           .then((blob) => {
             audioCache.current.set(key, URL.createObjectURL(blob));
           })
@@ -204,6 +262,10 @@ function WorkspaceInner() {
   );
 
   const stopSpeech = useCallback(() => {
+    // Reveal the rest of the interrupted turn's blocks — they were part of a
+    // finished step, so the board keeps its content even though the audio
+    // never played them.
+    const maxKey = speakQueue.current.reduce((m, j) => Math.max(m, j.key), spokenUpToRef.current);
     speakQueue.current = [];
     const audio = audioRef.current;
     if (audio) {
@@ -217,6 +279,7 @@ function WorkspaceInner() {
     setCaption("");
     setCaptionProg(0);
     captionRef.current = "";
+    if (maxKey > spokenUpToRef.current) setSpokenUpTo(maxKey);
   }, []);
 
   useEffect(() => {
@@ -290,6 +353,15 @@ function WorkspaceInner() {
           if (event.block.speak) enqueueSpeech(event.idx, event.block.speak);
           if (event.block.kind === "feedback" && typeof event.block.correct === "boolean") {
             recordProgressRef.current?.(event.block.correct);
+            setXpBurst({ key: Date.now(), ok: event.block.correct });
+            if (event.block.correct) setConfetti((c) => c + 1);
+            setDifficulty((prev) => {
+              const ok = event.block.correct as boolean;
+              const streak = ok ? prev.streak + 1 : 0;
+              const dir = !ok ? -1 : streak >= 3 ? 2 : streak >= 2 ? 1 : 0;
+              const step = Math.max(1, Math.min(5, baseStepRef.current + dir));
+              return { c: prev.c + (ok ? 1 : 0), w: prev.w + (ok ? 0 : 1), streak, step, dir };
+            });
           }
         }
       } else if (event.kind === "done") {
@@ -330,6 +402,7 @@ function WorkspaceInner() {
   const startLesson = useCallback(
     (wsId: string, prompt: string) => {
       abortRef.current?.abort();
+      pendingAskRef.current = null;
       const controller = new AbortController();
       abortRef.current = controller;
       setStatus("connecting");
@@ -361,6 +434,7 @@ function WorkspaceInner() {
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || !sessionId || streaming) return;
+      pendingAskRef.current = null;
       // Interrupt Immergo when the student speaks — like a real conversation
       stopSpeech();
       setStreaming(true);
@@ -387,6 +461,97 @@ function WorkspaceInner() {
     [sessionId, streaming, handleEvent, handleStreamError, stopSpeech]
   );
 
+  // Point-and-ask / quick chips must NOT interrupt the lesson: if Immergo is
+  // still streaming or speaking, the question waits and is sent right after
+  // the current turn fully finishes (stream done + speech queue drained).
+  const queueStudentMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !sessionId) return;
+      const busy = streaming || playingRef.current || pausedRef.current || speakQueue.current.length > 0;
+      if (busy) {
+        pendingAskRef.current = trimmed;
+        return;
+      }
+      sendStudentMessage(trimmed);
+    },
+    [sessionId, streaming, sendStudentMessage]
+  );
+
+  useEffect(() => {
+    if (streaming || playingRef.current || pausedRef.current || speakQueue.current.length > 0) return;
+    if (!sessionId || !pendingAskRef.current) return;
+    const q = pendingAskRef.current;
+    pendingAskRef.current = null;
+    sendStudentMessage(q);
+  }, [streaming, speakingKey, paused, sessionId, sendStudentMessage]);
+
+  // -------------------------------------------------------------------------
+  // Highlight handlers
+  // -------------------------------------------------------------------------
+  const handleTextMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      if (!highlightMode || !sessionId) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const text = sel.toString().trim();
+      if (!text) return;
+      // Find which block was selected by walking up to the nearest data-block-idx
+      const range = sel.getRangeAt(0);
+      const container = range.commonAncestorContainer as HTMLElement;
+      const blockEl = (container.nodeType === Node.TEXT_NODE ? container.parentElement : container)?.closest("[data-block-idx]");
+      const blockIdx = blockEl ? parseInt((blockEl as HTMLElement).dataset.blockIdx ?? "-1", 10) : -1;
+      if (blockIdx === -1) return;
+      setColorPicker({ x: e.clientX, y: e.clientY, blockIdx, text });
+    },
+    [highlightMode, sessionId]
+  );
+
+  const applyHighlight = useCallback(
+    async (color: HighlightColor) => {
+      if (!colorPicker || !sessionId) return;
+      // A selection across several list items arrives as lines joined with
+      // "\n"; save one highlight per line so each matches its item's text.
+      const parts = colorPicker.text
+        .split("\n")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      try {
+        const saved = await Promise.all(
+          parts.map((p) => saveHighlight(sessionId, colorPicker.blockIdx, p, color))
+        );
+        setHighlights((prev) => {
+          const next = [...prev];
+          for (const h of saved) {
+            const i = next.findIndex((x) => x.id === h.id);
+            if (i === -1) next.push(h);
+            else next[i] = h;
+          }
+          return next;
+        });
+      } catch (err) {
+        console.error("Failed to save highlight", err);
+        setError(errorMessage(err, "Could not save the highlight"));
+      }
+      setColorPicker(null);
+      window.getSelection()?.removeAllRanges();
+    },
+    [colorPicker, sessionId]
+  );
+
+  const removeHighlight = useCallback(
+    async (h: Highlight) => {
+      if (!sessionId) return;
+      try {
+        await deleteHighlight(sessionId, h.id);
+        setHighlights((prev) => prev.filter((x) => x.id !== h.id));
+      } catch (err) {
+        console.error("Failed to remove highlight", err);
+      }
+    },
+    [sessionId]
+  );
+
   const rejoin = useCallback(async () => {
     if (!sessionId) return;
     setError("");
@@ -400,6 +565,11 @@ function WorkspaceInner() {
       setStatus("live");
       setStreaming(false);
       stopSpeech();
+      // Load highlights
+      try {
+        const hs = await fetchHighlights(sessionId);
+        setHighlights(hs);
+      } catch { /* highlights optional */ }
     } catch (err: unknown) {
       setStatus("reconnecting");
       setError(errorMessage(err, "Could not rejoin the lesson"));
@@ -433,6 +603,11 @@ function WorkspaceInner() {
           setPlan(data.plan || []);
           setSpokenUpTo(data.blocks.length - 1);
           setStatus("live");
+          // Load highlights for existing session
+          try {
+            const hs = await fetchHighlights(lessonParam);
+            setHighlights(hs);
+          } catch { /* highlights optional */ }
         } catch {
           setStatus("reconnecting");
           setSessionId(lessonParam);
@@ -613,6 +788,7 @@ function WorkspaceInner() {
 
   // Drag-to-pan like a whiteboard app — the board is an infinite canvas.
   const onPointerDown = (e: React.PointerEvent) => {
+    if (highlightMode) return;
     const t = e.target as HTMLElement;
     if (t.closest("button, input, a, textarea, label")) return;
     if (e.button !== 0) return;
@@ -753,6 +929,7 @@ function WorkspaceInner() {
 
   const endLesson = () => {
     abortRef.current?.abort();
+    pendingAskRef.current = null;
     stopSpeech();
     router.push("/");
   };
@@ -787,6 +964,114 @@ function WorkspaceInner() {
   }, [awaitingStudent, streaming]);
 
   // -------------------------------------------------------------------------
+  // Simple markdown parser for transcript
+  // -------------------------------------------------------------------------
+  const boldify = (t: string, key: number): React.ReactNode => {
+    const parts = t.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") ? (
+        <strong key={`${key}-${i}`} className="font-bold">{part.slice(2, -2)}</strong>
+      ) : (
+        <React.Fragment key={`${key}-${i}`}>{part}</React.Fragment>
+      )
+    );
+  };
+  const parseMarkdown = (text: string): React.ReactNode => renderRich(text, boldify);
+
+  // -------------------------------------------------------------------------
+  // Highlight + inline-markdown rendering helper
+  // -------------------------------------------------------------------------
+  /** Renders text with **bold** markdown and highlight overlays.
+   *  Highlights are stored as plain text (no **), so we strip markers before
+   *  matching, then merge bold + highlight ranges when rendering. */
+  const renderWithHighlights = (text: string, blockIdx: number): React.ReactNode => {
+    type HRange = { start: number; end: number; hl: Highlight };
+    const blockHighlights = highlights.filter((h) => h.block_idx === blockIdx);
+
+    // Bold + highlight rendering for a math-free chunk (offsets are local).
+    const renderPlain = (plain: string): React.ReactNode => {
+      type Seg = { text: string; bold: boolean };
+      const segs: Seg[] = [];
+      const boldRe = /\*\*(.+?)\*\*/g;
+      let lastBold = 0;
+      let bm;
+      while ((bm = boldRe.exec(plain)) !== null) {
+        if (bm.index > lastBold) segs.push({ text: plain.slice(lastBold, bm.index), bold: false });
+        segs.push({ text: bm[1], bold: true });
+        lastBold = bm.index + bm[0].length;
+      }
+      if (lastBold < plain.length) segs.push({ text: plain.slice(lastBold), bold: false });
+      if (segs.length === 0) return plain;
+
+      const hRanges: HRange[] = [];
+      for (const h of blockHighlights) {
+        const s = plain.indexOf(h.selected_text);
+        if (s === -1) continue;
+        const end = s + h.selected_text.length;
+        const i = hRanges.findIndex((r) => s < r.end && r.start < end);
+        if (i !== -1) hRanges[i] = { start: s, end, hl: h };
+        else hRanges.push({ start: s, end, hl: h });
+      }
+      hRanges.sort((a, b) => a.start - b.start);
+
+      const result: React.ReactNode[] = [];
+      let ki = 0;
+      let offset = 0;
+
+      for (const seg of segs) {
+        const segStart = offset;
+        const segEnd = offset + seg.text.length;
+        offset = segEnd;
+
+        const overlapping = hRanges.filter((hr) => hr.start < segEnd && hr.end > segStart);
+
+        let inner: React.ReactNode;
+        if (overlapping.length === 0) {
+          inner = seg.text;
+        } else {
+          const pieces: React.ReactNode[] = [];
+          let cur = 0;
+          for (const hr of overlapping) {
+            const hlS = Math.max(0, hr.start - segStart);
+            const hlE = Math.min(seg.text.length, hr.end - segStart);
+            if (hlS > cur) pieces.push(seg.text.slice(cur, hlS));
+            pieces.push(
+              <mark
+                key={`hl-${ki++}`}
+                title="Highlighted — click to remove"
+                onClick={() => removeHighlight(hr.hl)}
+                style={{ backgroundColor: COLOR_BG[hr.hl.color as HighlightColor], cursor: "pointer", borderRadius: "2px", padding: "0 1px" }}
+              >
+                {seg.text.slice(hlS, hlE)}
+              </mark>
+            );
+            cur = hlE;
+          }
+          if (cur < seg.text.length) pieces.push(seg.text.slice(cur));
+          inner = <>{pieces}</>;
+        }
+
+        if (seg.bold) {
+          result.push(<strong key={`b-${ki++}`}>{inner}</strong>);
+        } else {
+          result.push(<React.Fragment key={`f-${ki++}`}>{inner}</React.Fragment>);
+        }
+      }
+
+      return <>{result}</>;
+    };
+
+    // Math chunks render via KaTeX; plain chunks keep bold + highlight support.
+    const parts = splitMath(text);
+    const out: React.ReactNode[] = [];
+    parts.forEach((p, i) => {
+      if (p.math) out.push(<MathSpan key={`m-${i}`} tex={p.tex!} display={p.display} />);
+      else if (p.text) out.push(<React.Fragment key={`t-${i}`}>{renderPlain(p.text)}</React.Fragment>);
+    });
+    return <>{out}</>;
+  };
+
+  // -------------------------------------------------------------------------
   // Block rendering
   // -------------------------------------------------------------------------
   const materialTag = (
@@ -794,6 +1079,15 @@ function WorkspaceInner() {
       Your material
     </span>
   );
+
+  // The typewriter slices text mid-formula; an unclosed $...$ tail would show
+  // as raw LaTeX, so cut the partial math until its closing $ arrives.
+  const cutPartialMath = (s: string) => {
+    const n = (s.match(/\$/g) || []).length;
+    if (n % 2 === 0) return s;
+    const last = s.lastIndexOf("$");
+    return last > 0 ? s.slice(0, last) : s;
+  };
 
   const renderBlock = (block: LessonBlock, idx: number) => {
     const speaking = speakingKey === idx;
@@ -815,7 +1109,7 @@ function WorkspaceInner() {
         return (
           <div key={idx} className={`animate-board-in pt-6 text-center ${glow}`}>
             <h2 className="font-board-serif text-3xl md:text-4xl font-bold text-foreground">
-              {block.title}
+              {renderRich(block.title || "")}
               {block.material && materialTag}
             </h2>
             <div className="h-[3px] bg-board-line mt-1 w-full max-w-md mx-auto" />
@@ -825,27 +1119,35 @@ function WorkspaceInner() {
         return (
           <div key={idx} className={`animate-board-in pt-8 text-center ${glow}`}>
             <h3 className="font-board-serif text-xl md:text-2xl font-semibold text-foreground inline-block border-b-[3px] border-board-accent pb-0.5">
-              {block.title}
+              {renderRich(block.title || "")}
               {block.material && materialTag}
             </h3>
           </div>
         );
       case "note": {
-        const t = block.text ? block.text.slice(0, Math.round(block.text.length * prog)) : "";
+        const t = block.text ? cutPartialMath(block.text.slice(0, Math.round(block.text.length * prog))) : "";
         if (!t) return null;
         return (
-          <p key={idx} className={`animate-board-in font-hand text-lg leading-relaxed text-foreground text-center ${glow}`}>
-            {t}
+          <p
+            key={idx}
+            className={`animate-board-in font-hand text-lg leading-relaxed text-foreground text-center ${glow} ${highlightMode ? "cursor-text select-text" : ""}`}
+          >
+            {renderWithHighlights(t, idx)}
             {block.material && materialTag}
           </p>
         );
       }
       case "formula": {
-        const t = block.text ? block.text.slice(0, Math.round(block.text.length * prog)) : "";
+        const t = block.text ? cutPartialMath(block.text.slice(0, Math.round(block.text.length * prog))) : "";
         if (!t) return null;
         return (
-          <div key={idx} className={`animate-board-in py-3 text-center ${glow}`}>
-            <span className="font-board-serif italic text-2xl md:text-3xl text-foreground tracking-wide">{t}</span>
+          <div
+            key={idx}
+            className={`animate-board-in py-3 text-center ${glow} ${highlightMode ? "cursor-text select-text" : ""}`}
+          >
+            <span className="font-board-serif italic text-2xl md:text-3xl text-foreground tracking-wide">
+              {renderWithHighlights(t, idx)}
+            </span>
           </div>
         );
       }
@@ -853,11 +1155,11 @@ function WorkspaceInner() {
         const shown = (block.items || []).slice(0, Math.max(1, Math.ceil((block.items || []).length * prog)));
         if (prog === 0) return null;
         return (
-          <div key={idx} className={`animate-board-in space-y-1.5 ${glow}`}>
+          <div key={idx} className={`animate-board-in space-y-1.5 ${glow} ${highlightMode ? "cursor-text select-text" : ""}`}>
             {shown.map((item, i) => (
               <div key={i} className="flex gap-3 font-hand text-lg leading-relaxed text-foreground">
                 <span className="text-muted select-none">·</span>
-                <span>{item}</span>
+                <span>{renderWithHighlights(item, idx)}</span>
               </div>
             ))}
           </div>
@@ -867,19 +1169,19 @@ function WorkspaceInner() {
         const shown = (block.items || []).slice(0, Math.max(1, Math.ceil((block.items || []).length * prog)));
         if (prog === 0) return null;
         return (
-          <div key={idx} className={`animate-board-in space-y-1.5 ${glow}`}>
+          <div key={idx} className={`animate-board-in space-y-1.5 ${glow} ${highlightMode ? "cursor-text select-text" : ""}`}>
             {shown.map((item, i) => (
               <div key={i} className="flex gap-3 font-hand text-lg leading-relaxed text-foreground">
                 <span className="font-board-serif font-semibold select-none">{i + 1})</span>
-                <span>{item}</span>
+                <span>{renderWithHighlights(item, idx)}</span>
               </div>
             ))}
           </div>
         );
       }
       case "table": {
-        const columns = block.table?.columns || [];
-        const allRows = block.table?.rows || [];
+        const columns = block.columns || block.table?.columns || [];
+        const allRows = block.rows || block.table?.rows || [];
         if (prog === 0 || allRows.length === 0) return null;
         const shownRows = allRows.slice(0, Math.max(1, Math.ceil(allRows.length * prog)));
         return (
@@ -893,7 +1195,7 @@ function WorkspaceInner() {
                         key={i}
                         className="border border-board-line bg-board-task/30 px-3 py-1.5 text-left font-semibold"
                       >
-                        {c}
+                        {renderRich(c)}
                       </th>
                     ))}
                   </tr>
@@ -904,7 +1206,7 @@ function WorkspaceInner() {
                   <tr key={ri}>
                     {r.map((cell, ci) => (
                       <td key={ci} className="border border-board-line px-3 py-1.5 align-top">
-                        {cell}
+                        {renderRich(cell)}
                       </td>
                     ))}
                   </tr>
@@ -915,12 +1217,12 @@ function WorkspaceInner() {
         );
       }
       case "diagram": {
-        const nodes = block.diagram?.nodes || [];
+        const nodes = block.nodes || block.diagram?.nodes || [];
         if (prog === 0 || nodes.length === 0) return null;
         const shown = Math.max(1, Math.ceil(nodes.length * prog));
         const visNodes = nodes.slice(0, shown);
         const visIds = new Set(visNodes.map((n) => n.id));
-        const allEdges = (block.diagram?.edges || []).filter(
+        const allEdges = (block.edges || block.diagram?.edges || []).filter(
           (e) => Array.isArray(e) && e.length >= 2
         ) as [string, string, string?][];
         const visEdges = allEdges.filter(([s, t]) => visIds.has(s) && visIds.has(t));
@@ -1037,7 +1339,7 @@ function WorkspaceInner() {
                   <g key={n.id}>
                     {shape}
                     <text x={cx} y={cy + 4} textAnchor="middle" fontSize={12} className="fill-foreground font-hand">
-                      {n.label}
+                      {n.label.replace(/\$/g, "")}
                     </text>
                   </g>
                 );
@@ -1046,9 +1348,19 @@ function WorkspaceInner() {
           </div>
         );
       }
+      case "svg": {
+        if (prog === 0 || !block.content) return null;
+        return (
+          <div
+            key={idx}
+            className={`animate-board-in flex justify-center py-4 ${glow}`}
+            dangerouslySetInnerHTML={{ __html: block.content }}
+          />
+        );
+      }
       case "task": {
         const isOpen = awaitingStudent && idx === blocks.length - 1 && prog === 1;
-        const t = block.text ? block.text.slice(0, Math.round(block.text.length * prog)) : "";
+        const t = block.text ? cutPartialMath(block.text.slice(0, Math.round(block.text.length * prog))) : "";
         if (!t) return null;
         return (
           <div key={idx} className={`animate-board-in pt-4 ${glow}`}>
@@ -1056,7 +1368,7 @@ function WorkspaceInner() {
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-1">
                 Your turn{isOpen ? " — answer in the box below" : ""}
               </div>
-              <div className="font-hand text-lg leading-relaxed text-foreground">{t}</div>
+              <div className="font-hand text-lg leading-relaxed text-foreground">{renderWithHighlights(t, idx)}</div>
             </div>
           </div>
         );
@@ -1069,7 +1381,7 @@ function WorkspaceInner() {
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-1">
                 Where to go next
               </div>
-              <div className="font-hand text-lg leading-relaxed text-foreground">{title}</div>
+              <div className="font-hand text-lg leading-relaxed text-foreground">{renderRich(title)}</div>
               <div className="flex flex-wrap gap-2 mt-3">
                 {(block.options || []).map((o, i) => (
                   <button
@@ -1078,7 +1390,7 @@ function WorkspaceInner() {
                     disabled={!sessionId || streaming}
                     className="h-9 px-3.5 bg-foreground text-background rounded-md text-sm disabled:opacity-40 hover:opacity-85 transition-opacity"
                   >
-                    {o}
+                    {renderRich(o)}
                   </button>
                 ))}
               </div>
@@ -1103,49 +1415,63 @@ function WorkspaceInner() {
   // UI
   // -------------------------------------------------------------------------
   return (
-    <div className="flex flex-col h-screen w-full bg-board">
+    <div className="flex flex-col h-dvh w-full bg-board">
       {/* Header */}
-      <header className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
-        <div className="flex items-center gap-2 w-40">
-          <span className="w-4 h-4 rounded-full bg-gradient-to-br from-primary to-secondary inline-block" />
+      <header className="flex items-center justify-between gap-2 px-3 sm:px-5 py-3 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 w-28 sm:w-40 shrink-0">
+          <img src="/icon.svg" alt="" className="h-5 w-5" />
           <span className="font-semibold text-lg tracking-tight">immergo</span>
         </div>
-        <div className="flex items-center gap-2 text-sm text-muted">
+        <div className="flex items-center justify-center gap-2 text-sm text-muted min-w-0">
+          {difficulty.c + difficulty.w > 0 && (
+            <span
+              title="Task difficulty"
+              className={`flex items-center gap-1 border rounded-full px-2 py-0.5 font-mono text-[10px] tracking-widest ${
+                difficulty.dir < 0 ? "border-red-300 text-red-600" : difficulty.dir > 0 ? "border-green-300 text-green-700" : "border-border text-muted"
+              }`}
+            >
+              <Zap size={9} />
+              {difficulty.step}/5
+              {difficulty.dir > 0 && <TrendingUp size={9} />}
+              {difficulty.dir < 0 && <TrendingDown size={9} />}
+            </span>
+          )}
           {status === "live" && (
             <>
               <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
-              {t("ws.live")}
+              <span className="hidden sm:inline">{t("ws.live")}</span>
             </>
           )}
           {status === "connecting" && (
             <>
               <Loader2 size={13} className="animate-spin" />
-              {blocks.length === 0 ? t("ws.preparing") : t("ws.connecting")}
+              <span className="hidden sm:inline">{blocks.length === 0 ? t("ws.preparing") : t("ws.connecting")}</span>
             </>
           )}
           {status === "reconnecting" && (
             <>
               <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-              {t("ws.reconnecting")}
+              <span className="hidden sm:inline">{t("ws.reconnecting")}</span>
             </>
           )}
-          {status === "idle" && t("ws.ready")}
+          {status === "idle" && <span className="hidden sm:inline">{t("ws.ready")}</span>}
         </div>
-        <div className="flex items-center gap-2 w-40 justify-end">
+        <div className="flex items-center gap-1.5 sm:gap-2 justify-end shrink-0">
           <button
             onClick={() => setMaterialOpen(true)}
-            className="flex items-center gap-1.5 border border-border rounded-full px-3.5 py-1.5 text-sm text-foreground hover:border-foreground transition-colors"
+            className="flex items-center gap-1.5 border border-border rounded-full px-2.5 sm:px-3.5 py-1.5 text-sm text-foreground hover:border-foreground transition-colors"
           >
             <FileText size={14} />
-            {t("ws.material")}
+            <span className="hidden sm:inline">{t("ws.material")}</span>
           </button>
           <button
             onClick={endLesson}
-            className="flex items-center gap-1.5 bg-foreground text-background rounded-full px-3.5 py-1.5 text-sm hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1.5 bg-foreground text-background rounded-full px-2.5 sm:px-3.5 py-1.5 text-sm hover:opacity-80 transition-opacity"
           >
             <Square size={11} />
-            {t("ws.end")}
+            <span className="hidden sm:inline">{t("ws.end")}</span>
           </button>
+          <LogoutButton />
         </div>
       </header>
 
@@ -1165,7 +1491,13 @@ function WorkspaceInner() {
         <div className="px-5 py-2 bg-red-50 border-b border-red-200 text-sm text-red-700 shrink-0">{error}</div>
       )}
 
-      {/* Plan — one chip per lesson step, always visible above the board */}
+      {/* Split screen: Left (Board + Controls) | Right (Transcript) */}
+      <div className="flex-1 flex min-h-0 min-w-0">
+        
+        {/* Left Column */}
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
+
+          {/* Plan — one chip per lesson step, always visible above the board */}
       {plan.length > 0 && (
         <div className="flex items-center gap-2 px-5 py-2 border-b border-border bg-board shrink-0 overflow-x-auto">
           <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted mr-1">
@@ -1194,16 +1526,25 @@ function WorkspaceInner() {
         <div
           ref={boardRef}
           onWheel={onWheel}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onPointerLeave={onPointerUp}
-          className={`h-full w-full [touch-action:none] ${dragging ? "cursor-grabbing select-none" : "cursor-grab"}`}
+          {...(!highlightMode ? {
+            onPointerDown,
+            onPointerMove,
+            onPointerUp,
+            onPointerCancel: onPointerUp,
+            onPointerLeave: onPointerUp,
+          } : {})}
+          className={`h-full w-full ${
+            highlightMode
+              ? "cursor-text select-text"
+              : dragging
+                ? "cursor-grabbing select-none [touch-action:none]"
+                : "cursor-grab [touch-action:none]"
+          }`}
         >
           <div
             className="w-max min-w-full min-h-full"
             style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}
+            onMouseUp={highlightMode ? handleTextMouseUp : undefined}
           >
             <div className="min-h-full pb-32" style={{ zoom }}>
               {blocks.length === 0 && status === "connecting" && (
@@ -1246,7 +1587,7 @@ function WorkspaceInner() {
                           {chunk.map((b, i) => {
                             const globalIdx = col.start + cidx * 6 + i;
                             return (
-                              <div key={globalIdx} className="w-[440px]">
+                              <div key={globalIdx} className="w-[440px]" data-block-idx={globalIdx}>
                                 {renderBlock(b, globalIdx)}
                               </div>
                             );
@@ -1279,65 +1620,53 @@ function WorkspaceInner() {
 
         {/* Live caption (what Immergo is saying right now) */}
         {caption && (
-          <div
-            className={`absolute left-1/2 -translate-x-1/2 max-w-3xl w-[92%] pointer-events-none transition-all ${
-              transcriptOpen ? "bottom-[4.5rem]" : "bottom-4"
-            }`}
-          >
-            <div className="bg-foreground/90 text-background text-2xl font-medium leading-snug rounded-2xl px-6 py-3.5 backdrop-blur-sm whitespace-pre-line break-words text-left max-h-44 overflow-y-auto shadow-lg">
+          <div className="absolute left-1/2 -translate-x-1/2 max-w-3xl w-[92%] pointer-events-none transition-all bottom-4">
+            <div 
+              ref={captionContainerRef}
+              className="bg-foreground/90 text-background text-2xl font-medium leading-snug rounded-2xl px-6 py-3.5 backdrop-blur-sm whitespace-pre-line break-words text-center max-h-[5.8rem] overflow-hidden shadow-lg transition-all duration-75"
+            >
               <span>{caption.slice(0, Math.round(caption.length * captionProg))}</span>
               <span className="opacity-45">{caption.slice(Math.round(caption.length * captionProg))}</span>
             </div>
           </div>
         )}
 
-        {/* Transcript drawer */}
-        {transcriptOpen && (
-          <div className="absolute bottom-0 inset-x-0 max-h-72 overflow-y-auto bg-surface border-t border-border shadow-lg">
-            <div className="flex items-center justify-between px-5 py-2.5 border-b border-border sticky top-0 bg-surface">
-              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">Transcript</span>
-              <button onClick={() => setTranscriptOpen(false)} className="text-muted hover:text-foreground">
-                <X size={14} />
-              </button>
-            </div>
-            <div className="px-5 py-3 space-y-2.5">
-              {blocks.filter((b) => b.kind === "student" || b.speak).length === 0 ? (
-                <div className="text-sm text-muted">Nothing said yet.</div>
-              ) : (
-                blocks.map((b, i) => {
-                  if (b.kind === "student") {
-                    return (
-                      <div key={i} className="text-sm">
-                        <span className="font-mono text-[10px] uppercase tracking-widest text-muted mr-2">You</span>
-                        {b.text}
-                      </div>
-                    );
-                  }
-                  if (b.speak) {
-                    return (
-                      <div key={i} className="text-sm text-muted">
-                        <span className="font-mono text-[10px] uppercase tracking-widest mr-2">Immergo</span>
-                        {b.speak}
-                      </div>
-                    );
-                  }
-                  return null;
-                })
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Input row — text-only conversation with Immergo */}
       <div className="shrink-0 border-t border-border bg-surface px-4 py-3">
-        <div className="flex items-center gap-2 max-w-3xl mx-auto">
-          <input
+        {sessionId && (
+          <div className="flex items-center gap-2 max-w-3xl mx-auto mb-2">
+            <button
+              onClick={() => queueStudentMessage(t("ws.simpler"))}
+              className="border border-border rounded-full px-3 py-1 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors"
+            >
+              {t("ws.simpler")}
+            </button>
+            <button
+              onClick={() => queueStudentMessage(t("ws.quizMe"))}
+              className="border border-border rounded-full px-3 py-1 text-xs text-muted hover:text-foreground hover:border-foreground transition-colors"
+            >
+              {t("ws.quizMe")}
+            </button>
+          </div>
+        )}
+        <div className="flex items-end gap-2 max-w-3xl mx-auto">
+          <textarea
             ref={messageInputRef}
-            type="text"
+            rows={1}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            onChange={(e) => {
+              setInputText(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder={
               sessionId
                 ? awaitingStudent
@@ -1345,7 +1674,7 @@ function WorkspaceInner() {
                   : t("ws.askPh")
                 : t("ws.topicPh")
             }
-            className="flex-1 h-11 border border-border rounded-md px-3 text-sm outline-none focus:border-foreground transition-colors bg-background"
+            className="flex-1 min-h-11 max-h-[120px] py-2.5 resize-none border border-border rounded-md px-3 text-sm outline-none focus:border-foreground transition-colors bg-background"
           />
           <button
             onClick={toggleMic}
@@ -1390,14 +1719,14 @@ function WorkspaceInner() {
             step={0.05}
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="w-20 accent-foreground"
+            className="w-14 sm:w-20 accent-foreground"
           />
         </div>
 
         <div className="flex-1" />
 
         {/* Zoom */}
-        <div className="hidden sm:flex items-center gap-1 text-muted">
+        <div className="flex items-center gap-1 text-muted">
           <button
             onClick={() => setZoom((z) => Math.max(0.6, Math.round((z - 0.1) * 10) / 10))}
             className="w-7 h-7 flex items-center justify-center hover:text-foreground transition-colors"
@@ -1422,6 +1751,66 @@ function WorkspaceInner() {
         >
           <MessageSquare size={15} />
         </button>
+
+        {/* Highlight mode toggle */}
+        {sessionId && (
+          <button
+            onClick={() => {
+              setHighlightMode((v) => !v);
+              setColorPicker(null);
+            }}
+            title={highlightMode ? "Exit highlight mode" : "Highlight text"}
+            className={`flex items-center justify-center w-10 h-10 rounded-full border transition-colors ${
+              highlightMode
+                ? "border-yellow-400 bg-yellow-100 text-yellow-700"
+                : "border-border text-muted hover:text-foreground hover:border-foreground"
+            }`}
+          >
+            <Highlighter size={15} />
+          </button>
+        )}
+      </div>
+        </div>
+
+        {/* Transcript Sidebar — overlay drawer on mobile, inline column on lg */}
+        {transcriptOpen && (
+          <div className="fixed inset-0 z-20 bg-foreground/20 lg:hidden" onClick={() => setTranscriptOpen(false)} />
+        )}
+        {transcriptOpen && (
+          <div className="fixed inset-y-0 right-0 z-30 w-[85vw] max-w-[320px] flex flex-col bg-surface border-l border-border lg:static lg:z-10 lg:w-80 lg:max-w-none lg:shadow-[-4px_0_24px_rgba(0,0,0,0.02)]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-surface shrink-0">
+              <span className="font-mono text-[10px] uppercase tracking-widest text-muted">Transcript</span>
+              <button onClick={() => setTranscriptOpen(false)} className="text-muted hover:text-foreground transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+              {blocks.filter((b) => b.kind === "student" || b.speak).length === 0 ? (
+                <div className="text-sm text-muted text-center pt-8">Nothing said yet.</div>
+              ) : (
+                blocks.map((b, i) => {
+                  if (b.kind === "student") {
+                    return (
+                      <div key={i} className="text-sm leading-relaxed">
+                        <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-1">You</div>
+                        <div className="text-foreground whitespace-pre-line">{b.text ? parseMarkdown(b.text) : ""}</div>
+                      </div>
+                    );
+                  }
+                  if (b.speak) {
+                    return (
+                      <div key={i} className="text-sm leading-relaxed text-muted">
+                        <div className="font-mono text-[10px] uppercase tracking-widest text-foreground mb-1">Immergo</div>
+                        <div className="text-muted">{parseMarkdown(b.speak)}</div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Material drawer — split screen: Files / Summary / Podcast */}
@@ -1572,6 +1961,54 @@ function WorkspaceInner() {
           </div>
         </>
       )}
+      {/* Color picker popover */}
+      {colorPicker && (
+        <div
+          className="fixed z-[100] bg-surface border border-border shadow-xl rounded-xl p-2 flex items-center gap-1.5"
+          style={{ left: colorPicker.x - 60, top: colorPicker.y + 12 }}
+        >
+          {HIGHLIGHT_COLORS.map(({ color, bg, label }) => (
+            <button
+              key={color}
+              title={label}
+              onClick={() => applyHighlight(color)}
+              style={{ backgroundColor: bg, width: 28, height: 28, borderRadius: 6, border: "1.5px solid rgba(0,0,0,0.12)" }}
+            />
+          ))}
+          <button
+            onClick={() => setColorPicker(null)}
+            className="ml-1 text-muted hover:text-foreground transition-colors"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Dismiss color picker on outside click */}
+      {colorPicker && (
+        <div className="fixed inset-0 z-[99]" onClick={() => setColorPicker(null)} />
+      )}
+
+      {/* Reward moment: floating XP pill on each task verdict */}
+      {xpBurst && (
+        <div
+          key={xpBurst.key}
+          className={`animate-xp-float fixed bottom-28 left-1/2 z-[99] flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold shadow-lg ${
+            xpBurst.ok ? "bg-green-500 text-white" : "bg-red-100 border border-red-300 text-red-600"
+          }`}
+        >
+          {xpBurst.ok ? (
+            <>
+              <Zap size={14} /> +5 XP
+            </>
+          ) : (
+            <>
+              <XCircle size={14} /> Try again
+            </>
+          )}
+        </div>
+      )}
+      <Confetti burst={confetti} count={70} />
     </div>
   );
 }

@@ -81,10 +81,10 @@ export default function MyClassesPage() {
                     href={c.role === "owner" ? "/teacher" : `/workspace?workspace_id=${c.id}`}
                     className="flex items-center justify-between p-4 hover:bg-surface transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <BookOpen size={14} className="text-muted" />
-                      <div>
-                        <div className="text-sm font-medium">{c.title}</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <BookOpen size={14} className="text-muted shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{c.title}</div>
                         <div className="text-xs text-muted">
                           {c.subject} {c.grade ? `/ Grade ${c.grade}` : ""}
                         </div>

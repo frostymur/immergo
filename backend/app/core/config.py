@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     QWEN_API_BASE: str = "https://llm.alem.ai/v1"
     QWEN_MODEL: str = "qwen3-8"
 
+    # Lesson DELIVERY override — live lesson turns only (planning, diagnostics,
+    # roadmap keep using the models above). Leave LESSON_LLM_MODEL empty to use
+    # the per-language default. Base URL / key fall back to the Qwen endpoint.
+    # e.g. LESSON_LLM_MODEL=gpt-oss-20b | gpt-oss-120b | gemma-4-27b
+    LESSON_LLM_API_KEY: str = ""
+    LESSON_LLM_BASE_URL: str = ""
+    LESSON_LLM_MODEL: str = ""
+
     # Embeddings (separate Alem key with access to the "text-1024" embedder)
     ALEM_EMBED_API_KEY: str = ""
     ALEM_EMBED_BASE_URL: str = "https://llm.alem.ai/v1"
