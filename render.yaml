@@ -5,7 +5,7 @@ services:
     plan: free
     region: frankfurt
     rootDir: backend
-    dockerfilePath: Dockerfile
+    dockerfilePath: backend/Dockerfile
     healthCheckPath: /api/health
     envVars:
       - key: PORT
