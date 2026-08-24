@@ -30,29 +30,65 @@ async def synthesize_text(text: str, lang: str = "en", voice: str | None = None)
 VOICE_LANG_PREFIXES = {"kz": "kk-KZ-", "ru": "ru-RU-", "en": "en-US-"}
 
 
+
 async def list_voices() -> dict[str, list[dict[str, str]]]:
-    """Available TTS voices per language (from the edge-tts catalog)."""
-    result: dict[str, list[dict[str, str]]] = {"kz": [], "ru": [], "en": []}
+    result = {"kz": [], "ru": [], "en": []}
+    
+    # Curated English Voices with Personalities and Accents
+    en_voices = [
+        {"id": "en-GB-RyanNeural", "name": "Charon", "gender": "Informative", "accent": "gb"},
+        {"id": "en-US-ChristopherNeural", "name": "Charon", "gender": "Informative", "accent": "us"},
+        {"id": "en-AU-WilliamNeural", "name": "Charon", "gender": "Informative", "accent": "au"},
+
+        {"id": "en-GB-SoniaNeural", "name": "Aoede", "gender": "Breezy", "accent": "gb"},
+        {"id": "en-US-AriaNeural", "name": "Aoede", "gender": "Breezy", "accent": "us"},
+        {"id": "en-AU-NatashaNeural", "name": "Aoede", "gender": "Breezy", "accent": "au"},
+
+        {"id": "en-GB-AlfieNeural", "name": "Puck", "gender": "Upbeat", "accent": "gb"},
+        {"id": "en-US-GuyNeural", "name": "Puck", "gender": "Upbeat", "accent": "us"},
+        {"id": "en-AU-NeilNeural", "name": "Puck", "gender": "Upbeat", "accent": "au"},
+
+        {"id": "en-GB-MiaNeural", "name": "Leda", "gender": "Youthful", "accent": "gb"},
+        {"id": "en-US-JennyNeural", "name": "Leda", "gender": "Youthful", "accent": "us"},
+        {"id": "en-AU-CarlyNeural", "name": "Leda", "gender": "Youthful", "accent": "au"},
+
+        {"id": "en-GB-ThomasNeural", "name": "Algieba", "gender": "Smooth", "accent": "gb"},
+        {"id": "en-US-EricNeural", "name": "Algieba", "gender": "Smooth", "accent": "us"},
+        {"id": "en-AU-DuncanNeural", "name": "Algieba", "gender": "Smooth", "accent": "au"},
+
+        {"id": "en-GB-ElliotNeural", "name": "Enceladus", "gender": "Breathy", "accent": "gb"},
+        {"id": "en-US-SteffanNeural", "name": "Enceladus", "gender": "Breathy", "accent": "us"},
+        {"id": "en-AU-TimNeural", "name": "Enceladus", "gender": "Breathy", "accent": "au"},
+
+        {"id": "en-GB-LibbyNeural", "name": "Kore", "gender": "Firm", "accent": "gb"},
+        {"id": "en-US-MichelleNeural", "name": "Kore", "gender": "Firm", "accent": "us"},
+        {"id": "en-AU-JoanneNeural", "name": "Kore", "gender": "Firm", "accent": "au"},
+
+        {"id": "en-GB-OliverNeural", "name": "Fenrir", "gender": "Excitable", "accent": "gb"},
+        {"id": "en-US-RogerNeural", "name": "Fenrir", "gender": "Excitable", "accent": "us"},
+        {"id": "en-AU-DarrenNeural", "name": "Fenrir", "gender": "Excitable", "accent": "au"},
+    ]
+    result["en"] = en_voices
+
     try:
+        import edge_tts
         voices = await edge_tts.list_voices()
         for v in voices:
             sn = v.get("ShortName", "")
-            for lang, prefix in VOICE_LANG_PREFIXES.items():
-                if sn.startswith(prefix):
-                    result[lang].append(
-                        {
-                            "id": sn,
-                            "name": v.get("FriendlyName", sn),
-                            "gender": v.get("Gender", ""),
-                        }
-                    )
+            if sn.startswith("kk-KZ-"):
+                result["kz"].append({"id": sn, "name": v.get("FriendlyName", sn).split(" - ")[-1].replace(" (Neural)", ""), "gender": v.get("Gender", "")})
+            elif sn.startswith("ru-RU-"):
+                result["ru"].append({"id": sn, "name": v.get("FriendlyName", sn).split(" - ")[-1].replace(" (Neural)", ""), "gender": v.get("Gender", "")})
     except Exception:
         pass
-    for lang in result:
+        
+    for lang in ["kz", "ru"]:
         if not result[lang]:
             default = VOICE_MAP.get(lang, VOICE_MAP["en"])
             result[lang] = [{"id": default, "name": default, "gender": ""}]
+            
     return result
+
 
 
 def _has_ffmpeg() -> bool:

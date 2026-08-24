@@ -370,6 +370,7 @@ async def _load_lesson_blocks(session_id: str) -> list[dict[str, Any]]:
 
 async def _stream_lesson(
     session_id: str,
+    workspace_id: str,
     history: list[dict[str, Any]],
     context: str,
     used_material: bool,
@@ -390,6 +391,33 @@ async def _stream_lesson(
     """
     current_step = max((b.get("step", -1) for b in history), default=-1)
     idx = start_idx
+    
+    profile = None
+    try:
+        profile_row = await fetch_one(
+            """
+            SELECT p.full_name, p.studying, p.grade, p.deadline, p.interests, p.goal_text, p.learning_accommodations, p.custom_instructions
+            FROM class_memberships m
+            JOIN profiles p ON p.id = m.student_id
+            WHERE m.workspace_id = $1
+            """,
+            uuid.UUID(workspace_id)
+        )
+        if not profile_row:
+            profile_row = await fetch_one(
+                """
+                SELECT p.full_name, p.studying, p.grade, p.deadline, p.interests, p.goal_text, p.learning_accommodations, p.custom_instructions
+                FROM workspaces w
+                JOIN profiles p ON p.id = w.user_id
+                WHERE w.id = $1
+                """,
+                uuid.UUID(workspace_id)
+            )
+        if profile_row:
+            profile = dict(profile_row)
+    except Exception:
+        pass
+
     try:
         async for block in stream_lesson_turn(
             history=history,
@@ -400,6 +428,7 @@ async def _stream_lesson(
             plan=plan,
             level=level,
             verdict=verdict,
+            profile=profile,
         ):
             if block.get("kind") == "plan_update":
                 new_steps = [
@@ -464,6 +493,7 @@ async def lesson_start(body: LessonStartRequest):
         yield _sse({"kind": "session", "session_id": session_id, "prompt": body.prompt})
         async for event in _stream_lesson(
             session_id=session_id,
+            workspace_id=body.workspace_id,
             history=[],
             context=context,
             used_material=used_material,
@@ -514,6 +544,7 @@ async def lesson_message(session_id: str, body: LessonMessageRequest):
         yield _sse({"kind": "student", "idx": student_idx, "block": student_block})
         async for event in _stream_lesson(
             session_id=session_id,
+            workspace_id=str(session["workspace_id"]),
             history=history + [student_block],
             context=context,
             used_material=used_material,

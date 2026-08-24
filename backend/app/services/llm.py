@@ -648,6 +648,7 @@ async def stream_lesson_turn(
     level: str = "intermediate",
     model: str | None = None,
     verdict: dict[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Stream one lesson turn from the LLM as parsed whiteboard blocks.
 
@@ -667,6 +668,28 @@ async def stream_lesson_turn(
     }.get(level, "")
     if level_note:
         system += f"\n\nADAPTIVE DIFFICULTY: {level_note}"
+
+    if profile:
+        profile_notes = []
+        if profile.get("full_name"):
+            profile_notes.append(f"Student's name is {profile['full_name']}. Use it naturally but sparingly.")
+        if profile.get("studying"):
+            profile_notes.append(f"Student is currently studying: {profile['studying']}.")
+        if profile.get("grade"):
+            profile_notes.append(f"Student is in grade: {profile['grade']}.")
+        if profile.get("deadline"):
+            profile_notes.append(f"Student has an exam or deadline on: {profile['deadline']}.")
+        if profile.get("interests"):
+            profile_notes.append(f"Student's interests: {profile['interests']}. Use these for analogies when it genuinely fits.")
+        if profile.get("goal_text"):
+            profile_notes.append(f"Student's goal: {profile['goal_text']}.")
+        if profile.get("learning_accommodations"):
+            profile_notes.append(f"Accommodations/Preferences: {profile['learning_accommodations']}. Accommodate this quietly, do not explicitly bring it up.")
+        if profile.get("custom_instructions"):
+            profile_notes.append(f"CRITICAL CUSTOM INSTRUCTIONS FROM STUDENT: {profile['custom_instructions']}. These take precedence over standard behavior.")
+            
+        if profile_notes:
+            system += "\n\nABOUT THE STUDENT:\n- " + "\n- ".join(profile_notes)
 
     directive = ""
     directive_kind = ""

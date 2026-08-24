@@ -288,7 +288,7 @@ export async function fetchLesson(sessionId: string): Promise<{
   return apiFetch(`/api/ai/lesson/${sessionId}`);
 }
 
-export type TtsVoice = { id: string; name: string; gender: string };
+export type TtsVoice = { id: string; name: string; gender: string; accent?: string };
 export type TtsVoices = Record<"kz" | "ru" | "en", TtsVoice[]>;
 
 export async function fetchTtsAudio(text: string, lang: string, voice?: string): Promise<Blob> {
