@@ -375,6 +375,60 @@ All secrets live in `.env` files (gitignored). Never commit API keys.
 
 ---
 
+## 🔄 User Flows
+
+### 🧑‍🏫 Teacher Flow
+
+1. **Login** → `/` → sign in (teacher.demo@demo.kz) → "Teacher Cabinet"
+2. **Select class** → "Physics 12" → analytics load
+3. **Teacher Dashboard** shows two blocks:
+   - **Heatmap** (red squares) — where students make mistakes during lessons (from `student_progress`)
+   - **Struggling topics** (progress bars) — weak topics from diagnostic (from `diagnostic_results.answers`)
+   - Labels "from lessons" and "from diagnostic" — two independent data sources
+4. **Readiness** — student list with chips: `ready` / `on_track` / `at_risk` (composite score: 50% diagnostic + 30% roadmap + 20% practice)
+5. **Expand student** → sees diagnostic history (2 attempts, trend +13%)
+6. **Click weak topic** → "Assign homework" → assignment modal
+
+**What teacher sees:** who's falling behind, which topics, how progress changes.
+
+---
+
+### 🧑‍ Student Flow
+
+1. **Login** → `/` → sign in (aigul.student@demo.kz) → "My Cabinet"
+2. **Student Dashboard** shows:
+   - XP, streak, badges
+   - **Weak topics** — two blocks: "Weak topics from diagnostic" (primary) + "Lesson mistakes" (secondary)
+   - Last diagnostic: "8/15 · intermediate"
+   - AI recommendation
+3. **Click "Open plan"** → `/roadmap?weak=...` → Roadmap with weak topics banner at the top
+4. **Click "Start lesson"** → `/workspace?topic=...&weak=...`
+5. **Workspace**:
+   - AI tutor streams blocks (notes, KaTeX formulas, tasks, diagrams)
+   - Voice narrates content (edge-tts, selected in Settings)
+   - Student answers → **judge-call** (separate LLM) checks answer before tutor reacts
+   - Wrong answer → scaffolding, doesn't accept
+   - Quick chips: "Explain simpler" / "Quiz me"
+   - Difficulty ladder ⚡ 1–5 auto-adapts
+6. **After lesson** → back to dashboard → weak topics update, XP grows
+
+**What student gets:** personalized plan, adaptive lesson, honest grading, voice in native language.
+
+---
+
+### 🔗 Connection
+
+```
+Diagnostic (15 Q) → weak_topics → Dashboard (displays)
+                              → Roadmap (saves, prioritizes first)
+                              → Workspace (AI focuses on weak topics)
+                              → Teacher Dashboard (heatmap updates)
+```
+
+Data flows both ways: student learns → teacher sees progress → teacher assigns tasks → student completes.
+
+---
+
 ## 📊 Demo Walkthrough
 
 1. **🔐 Login** — `aigul.student@demo.kz` / `demo123456`
